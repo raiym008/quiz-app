@@ -1,12 +1,22 @@
 # main.py — FastAPI entry (DOCX → Quiz парсинг, алдын-ала қарау, bulk сақтаумен)
 # Жаңа нұсқа: alghoritm.pipeline.process_docx пайдаланады
+# + Аутентификация (register/login/me/refresh) роуттары осы файлға қосылды
 
 from __future__ import annotations
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Body
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+from email_sender import generate_code, send_verification_email
+from .schemas import RegisterIn, VerifyIn, LoginIn, TokenOut, UserOut, ActivityAddIn, ActivityOut
+from .auth import (
+    hash_password, verify_password,
+    create_access_token, create_refresh_token,
+    decode_access_token, decode_refresh_token
+)
 
 import os
 import re
@@ -15,18 +25,32 @@ import shutil
 import tempfile
 from uuid import uuid4
 from typing import Optional, List
+import random
+from datetime import datetime
 
 # ───────────────────────────────────────────────────────────
 # DB (жобаңдағы бар қабатты қолданамыз — өзгеріссіз)
 # ───────────────────────────────────────────────────────────
-from database import SessionLocal  # Base/engine қажет болса, осында қалдыра бер
-from models import Subject, Topic, Quiz
+from database import SessionLocal  # ← User моделі database.py ішінде болуы тиіс
+from models import Subject, Topic, Quiz, VerificationCode, User, RegisterIn, UserActivity
 
 # ───────────────────────────────────────────────────────────
 # Біздің гибрид парсер
 # ───────────────────────────────────────────────────────────
 from alghoritm.pipeline import process_docx  # ← Басты өзгеріс: тек осы қажет
-
+'''
+# ───────────────────────────────────────────────────────────
+# Auth утилиталары (ре-экспорт auth/__init__.py арқылы)
+# ───────────────────────────────────────────────────────────
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+)
+'''
 # ───────────────────────────────────────────────────────────
 # FastAPI және CORS
 # ───────────────────────────────────────────────────────────
@@ -58,7 +82,7 @@ def normalize_key(s: str) -> str:
     return re.sub(r"[\s\-]+", "-", (s or "").strip().casefold())
 
 # ───────────────────────────────────────────────────────────
-# Pydantic схемалар
+# Pydantic схемалар (бар файлдың үстіне аутх схемаларын қостық)
 # ───────────────────────────────────────────────────────────
 class SubjectCreate(BaseModel):
     name: str
@@ -81,6 +105,24 @@ class BulkSaveRequest(BaseModel):
 
 class AnswerCheck(BaseModel):
     selected_answer: str
+
+# ---- Auth схемалары ----
+class RegisterIn(BaseModel):
+    username: str
+    password: str
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+
+class TokenOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
 
 # ───────────────────────────────────────────────────────────
 # Статикалық медиа (сурет/файл)
@@ -290,3 +332,175 @@ def save_quizzes_bulk(topic_id: int, payload: BulkSaveRequest, db: Session = Dep
 
     db.commit()
     return {"message": f"{len(created_ids)} сұрақ сақталды ✅", "ids": created_ids}
+
+
+
+# Пайдалы модель
+class QuizByTopicsRequest(BaseModel):
+    topic_ids: List[int]
+    shuffle: bool = True
+    limit: Optional[int] = None
+
+
+
+@app.post("/api/topics/{topic_id}/exam")
+def get_quizzes_by_topics(payload: QuizByTopicsRequest, db: Session = Depends(get_db)):
+    if not payload.topic_ids:
+        raise HTTPException(status_code=400, detail="Тақырып таңдалмады")
+
+    # Барлық таңдалған тақырыптардан сұрақтарды аламыз
+    quizzes = (
+        db.query(Quiz)
+        .filter(Quiz.topic_id.in_(payload.topic_ids))
+        .all()
+    )
+
+    if not quizzes:
+        raise HTTPException(status_code=404, detail="Таңдалған тақырыптарда quiz табылмады")
+
+    # Shuffle
+    if payload.shuffle:
+        random.shuffle(quizzes)
+
+    # Limit қолдану
+    if payload.limit:
+        quizzes = quizzes[: payload.limit]
+
+    # options = "A;B;C;D" → List[str]
+    result = []
+    for q in quizzes:
+        result.append(
+            {
+                "id": q.id,
+                "question": q.question,
+                "options": q.options.split(";"),
+            }
+        )
+
+    return {"count": len(result), "quizzes": result}
+
+
+class QuizCheckRequest(BaseModel):
+    selected_answer: str
+
+@app.post("/api/topics/{topic_id}/check")
+def check_quiz_answer(quiz_id: int, req: QuizCheckRequest, db: Session = Depends(get_db)):
+    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Сұрақ табылмады")
+
+    correct = quiz.answer.strip() == req.selected_answer.strip()
+    return {"correct": correct, "correct_answer": quiz.answer}
+
+
+# ========================================================================
+security = HTTPBearer()
+
+
+def require_user(credentials: HTTPAuthorizationCredentials = Depends(security),
+                 db: Session = Depends(get_db)) -> User:
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Токен жарамсыз немесе мерзімі өткен")
+    username = payload.get("sub")
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Қолданушы табылмады")
+    return user
+
+# ───────────── Auth ─────────────
+@app.post("/api/auth/register")
+def register_user(payload: RegisterIn, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Бұл email тіркелген")
+    if db.query(User).filter(User.username == payload.username).first():
+        raise HTTPException(status_code=400, detail="Бұл username тіркелген")
+
+    user = User(
+        email=payload.email,
+        username=payload.username,
+        hashed_password=hash_password(payload.password),
+        is_verified=False,
+    )
+    db.add(user); db.commit(); db.refresh(user)
+
+    code = generate_code()
+    db.add(VerificationCode(user_id=user.id, code=code))
+    db.commit()
+
+    send_verification_email(payload.email, code)
+    return {"msg": "Email-ға код жіберілді"}
+
+@app.post("/api/auth/verify")
+def verify_user(payload: VerifyIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Қолданушы табылмады")
+
+    vc = (
+        db.query(VerificationCode)
+        .filter(VerificationCode.user_id == user.id)
+        .order_by(VerificationCode.id.desc())
+        .first()
+    )
+    if not vc:
+        raise HTTPException(status_code=400, detail="Код табылмады")
+    if vc.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Кодтың уақыты біткен")
+    if vc.code != payload.code:
+        raise HTTPException(status_code=400, detail="Код дұрыс емес")
+
+    user.is_verified = True
+    db.commit()
+    return {"msg": "Аккаунт расталды ✅"}
+
+@app.post("/api/auth/login", response_model=TokenOut)
+def login_user(payload: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == payload.username).first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Қате логин немесе пароль")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email расталмаған")
+
+    access = create_access_token({"sub": user.username})
+    refresh = create_refresh_token({"sub": user.username})
+    return TokenOut(access_token=access, refresh_token=refresh)
+
+@app.get("/api/auth/me", response_model=UserOut)
+def get_me(user: User = Depends(require_user)):
+    return UserOut(
+        id=user.id, email=user.email, username=user.username, is_verified=user.is_verified
+    )
+
+@app.post("/api/auth/refresh", response_model=TokenOut)
+def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    payload = decode_refresh_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Refresh токен жарамсыз")
+    username = payload.get("sub")
+    access = create_access_token({"sub": username})
+    refresh = create_refresh_token({"sub": username})
+    return TokenOut(access_token=access, refresh_token=refresh)
+
+# ───────────── Activity ─────────────
+@app.post("/api/activity/add")
+def add_activity(body: ActivityAddIn, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    rec = UserActivity(user_id=user.id, action=body.action, meta=body.meta)
+    db.add(rec); db.commit(); db.refresh(rec)
+    return {"id": rec.id, "message": "Жазылды ✅"}
+
+@app.get("/api/activity/me", response_model=List[ActivityOut])
+def my_activity(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    rows = (
+        db.query(UserActivity)
+        .filter(UserActivity.user_id == user.id)
+        .order_by(UserActivity.id.desc())
+        .limit(100)
+        .all()
+    )
+    out: List[ActivityOut] = []
+    for r in rows:
+        out.append(ActivityOut(id=r.id, action=r.action, meta=r.meta,
+                               created_at=r.created_at.isoformat()))
+    return out

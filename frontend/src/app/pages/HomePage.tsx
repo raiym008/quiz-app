@@ -1,7 +1,7 @@
 // src/pages/HomePage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaSearch, FaArrowRight, FaBookOpen } from "react-icons/fa";
+import { FaSearch, FaArrowRight, FaBookOpen, FaPlus } from "react-icons/fa";
 
 interface Subject {
   id: number;
@@ -47,6 +47,7 @@ export default function HomePage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? subjects.filter((s) => s.name.toLowerCase().includes(q)) : subjects;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subjects, query]);
 
   return (
@@ -94,7 +95,19 @@ export default function HomePage() {
               </div>
             </div>
           </div>
-          <div className="text-muted small">Қош келдіңіз!</div>
+
+          {/* 🔽 ЖАҢА: Quiz құру батырмасы */}
+          <div className="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => navigate("/quiz-jasau")}
+              title="Quiz құру бетіне өту"
+            >
+              <FaPlus className="me-2" />
+              Quiz құру
+            </button>
+          </div>
         </div>
       </div>
 
@@ -129,7 +142,7 @@ export default function HomePage() {
 
       {/* Контент күйлері: жүктелу / қате / бос / карточкалар */}
       {loading ? (
-        // Loading skeleton — когнитив жүктемені азайтады, күтуді түсіндіреді
+        // Loading skeleton
         <div className="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div className="col" key={i}>
@@ -147,19 +160,16 @@ export default function HomePage() {
           ))}
         </div>
       ) : error ? (
-        // Error state — нақты түсінікті хабарлама
         <div className="alert alert-danger" role="alert">
           {error}
         </div>
       ) : filtered.length === 0 ? (
-        // Empty state — эмоция қосу, нені істеу керегін көрсету
         <div className="card border-0 shadow-sm p-4 text-center text-muted">
           <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 12 }}>🔎</div>
           Іздеуіңізге сәйкес пән табылмады.
           <div className="mt-2 small">Бас әріпсіз жазып көріңіз немесе қысқаша атауын енгізіңіз.</div>
         </div>
       ) : (
-        // Пән карточкалары — профайлге ұқсас, толық кликабельді, hover-friendly
         <div className="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
           {filtered.map((s) => {
             const slug = encodeURIComponent(toKey(s.name));
@@ -206,7 +216,6 @@ export default function HomePage() {
                       Тақырыптарға өту үшін басыңыз.
                     </p>
 
-                    {/* Ілгерілеу сезімін беру үшін кішкентай прогресс жолақ (болашақта нақты мәнге ауыстырасыз) */}
                     <div className="progress mb-3" style={{ height: 6 }}>
                       <div
                         className="progress-bar"
@@ -224,7 +233,6 @@ export default function HomePage() {
                       </span>
                     </div>
 
-                    {/* Толық карточканы кликабельді ететін “stretched-link” */}
                     <a
                       className="stretched-link"
                       href="#"

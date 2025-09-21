@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 from typing import List, Tuple, Optional, Dict
-from docx import Document
+from docx2python import docx2python
 
 # WordprocessingML namespace
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
@@ -67,7 +67,7 @@ class NumberingResolver:
     Word нөмірлеуін анықтау:
       numId + ilvl → numFmt ('decimal', 'lowerLetter', 'upperLetter', 'bullet', 'lowerRoman', т.б.)
     """
-    def __init__(self, doc: Document):
+    def __init__(self, doc: docx2python):
         self.doc = doc
         self._cache_fmt: Dict[Tuple[str, int], str] = {}
         # numId -> abstractNumId кеші
@@ -185,7 +185,7 @@ def extract_text(docx_path: str) -> List[str]:
     - Word-тың автоматты нөмірлеуін қайта құрады.
     - Бос жолдарды алып тастайды.
     """
-    doc = Document(docx_path)
+    doc = docx2python(docx_path)
     resolver = NumberingResolver(doc)
     marker_builder = ListMarkerBuilder(resolver)
 
