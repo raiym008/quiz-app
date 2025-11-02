@@ -1,22 +1,16 @@
 # main.py — FastAPI entry (DOCX → Quiz парсинг, алдын-ала қарау, bulk сақтаумен)
-# Жаңа нұсқа: alghoritm.pipeline.process_docx пайдаланады
-# + Аутентификация (register/login/me/refresh) роуттары осы файлға қосылды
+# Бұл нұсқада algorithm/… импорты жоқ.
+# Парсер learn.py логикасына негізделіп, осы файлдың ішінде жүзеге асырылды.
+# /api/parse-docx → { "questions": [{ "text", "options" }] } түрде қайтарады.
 
 from __future__ import annotations
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Body, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-from email_sender import generate_code, send_verification_email
-from .schemas import RegisterIn, VerifyIn, LoginIn, TokenOut, UserOut, ActivityAddIn, ActivityOut
-from .auth import (
-    hash_password, verify_password,
-    create_access_token, create_refresh_token,
-    decode_access_token, decode_refresh_token
-)
+from jose import jwt, JWTError
 
 import os
 import re
@@ -24,40 +18,57 @@ import json
 import shutil
 import tempfile
 from uuid import uuid4
-from typing import Optional, List
+from typing import Optional, List, Any
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# ───────────────────────────────────────────────────────────
-# DB (жобаңдағы бар қабатты қолданамыз — өзгеріссіз)
-# ───────────────────────────────────────────────────────────
-from database import SessionLocal  # ← User моделі database.py ішінде болуы тиіс
-from models import Subject, Topic, Quiz, VerificationCode, User, RegisterIn, UserActivity
+# DB қабаты
+from database import SessionLocal, get_db
+from models import Subject, Topic, Quiz, User
 
-# ───────────────────────────────────────────────────────────
-# Біздің гибрид парсер
-# ───────────────────────────────────────────────────────────
-from alghoritm.pipeline import process_docx  # ← Басты өзгеріс: тек осы қажет
-'''
-# ───────────────────────────────────────────────────────────
-# Auth утилиталары (ре-экспорт auth/__init__.py арқылы)
-# ───────────────────────────────────────────────────────────
-from auth import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_access_token,
-    decode_refresh_token,
-)
-'''
+# БӨЛЕК ПАРСЕР МОДУЛІ
+from quiz_parser import process_docx
+
+# бар жолды толықтыр
+from auth import register_user, verify_user, resend_verification_code
+from schemas import RegisterIn, VerifyIn, LoginIn, ResendIn, CreateRoomRequest, JoinRequest, RoomState, JoinResponse
+
+from modes.iquiz.iquiz_manager import iquiz_manager
+
+SECRET_KEY = "easy_super_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+
+def create_token(data: dict, minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=minutes)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(status_code=401, detail="Токен жарамсыз немесе ескі")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise credentials_exception
+    return user
 # ───────────────────────────────────────────────────────────
 # FastAPI және CORS
 # ───────────────────────────────────────────────────────────
 app = FastAPI()
 
 origins = [
-    "http://localhost:5173",
+    "http://10.147.31.99:5173",
+    "http://localhost:5173"
     # "https://senin-prod-domen.kz",
 ]
 app.add_middleware(
@@ -71,18 +82,12 @@ app.add_middleware(
 # ───────────────────────────────────────────────────────────
 # Көмекші: DB session, slug нормализация
 # ───────────────────────────────────────────────────────────
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 def normalize_key(s: str) -> str:
     return re.sub(r"[\s\-]+", "-", (s or "").strip().casefold())
 
 # ───────────────────────────────────────────────────────────
-# Pydantic схемалар (бар файлдың үстіне аутх схемаларын қостық)
+# Pydantic схемалар (пән/тақырып/квиз және парсингке арналған)
 # ───────────────────────────────────────────────────────────
 class SubjectCreate(BaseModel):
     name: str
@@ -106,24 +111,6 @@ class BulkSaveRequest(BaseModel):
 class AnswerCheck(BaseModel):
     selected_answer: str
 
-# ---- Auth схемалары ----
-class RegisterIn(BaseModel):
-    username: str
-    password: str
-
-class LoginIn(BaseModel):
-    username: str
-    password: str
-
-class UserOut(BaseModel):
-    id: int
-    username: str
-
-class TokenOut(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-
 # ───────────────────────────────────────────────────────────
 # Статикалық медиа (сурет/файл)
 # ───────────────────────────────────────────────────────────
@@ -136,7 +123,7 @@ async def upload_image(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
         raise HTTPException(status_code=400, detail="Рұқсат етілмеген формат")
-    fname = f"{uuid4().hex}{ext}"
+    fname = f"{uuid4().hex}{ext}..."
     save_path = os.path.join(UPLOAD_DIR, fname)
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -199,7 +186,7 @@ def delete_topic(topic_id: int, db: Session = Depends(get_db)):
     return {"message": "Тақырып өшірілді ✅"}
 
 # ───────────────────────────────────────────────────────────
-# Quiz: бір-бірлеп қосу (қалдырдық, қолмен енгізу үшін ыңғайлы)
+# Quiz: бір-бірлеп қосу (қолмен енгізуге ыңғайлы)
 # ───────────────────────────────────────────────────────────
 @app.post("/api/topics/{topic_id}/quizzes")
 def add_quiz(topic_id: int, quiz: QuizCreate, db: Session = Depends(get_db)):
@@ -207,10 +194,18 @@ def add_quiz(topic_id: int, quiz: QuizCreate, db: Session = Depends(get_db)):
     if not topic:
         raise HTTPException(status_code=404, detail="Тақырып табылмады")
 
+    # options-ты циклмен тазалау (list comprehension ЖОҚ)
+    cleaned_opts: List[str] = []
+    if quiz.options:
+        for o in quiz.options:
+            s = (o or "").strip()
+            if s:
+                cleaned_opts.append(s)
+
     new_quiz = Quiz(
-        question=quiz.question.strip(),
-        options=json.dumps([o.strip() for o in (quiz.options or [])], ensure_ascii=False),
-        correct_answer=(quiz.correct_answer or "").strip() if quiz.correct_answer else None,
+        question=(quiz.question or "").strip(),
+        options=json.dumps(cleaned_opts, ensure_ascii=False),
+        correct_answer=((quiz.correct_answer or "").strip() if quiz.correct_answer else None),
         topic_id=topic_id,
     )
     db.add(new_quiz)
@@ -225,15 +220,27 @@ def get_quizzes(topic_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Тақырып табылмады")
 
     quizzes = db.query(Quiz).filter(Quiz.topic_id == topic_id).all()
-    return [
-        {
+    out: List[dict] = []
+    for q in quizzes:
+        opts = []
+        try:
+            opts = json.loads(q.options) if q.options else []
+        except Exception:
+            # егер бұрынғы форматта болса (мыс: "A;B;C;D"), fallback:
+            tmp = (q.options or "")
+            parts = tmp.split(";")
+            for p in parts:
+                sp = (p or "").strip()
+                if sp:
+                    opts.append(sp)
+
+        out.append({
             "id": q.id,
             "question": q.question,
-            "options": json.loads(q.options) if q.options else [],
+            "options": opts,
             # correct_answer әдейі жіберілмейді
-        }
-        for q in quizzes
-    ]
+        })
+    return out
 
 @app.post("/api/quizzes/{quiz_id}/check")
 def check_answer(quiz_id: int, answer: AnswerCheck, db: Session = Depends(get_db)):
@@ -244,13 +251,13 @@ def check_answer(quiz_id: int, answer: AnswerCheck, db: Session = Depends(get_db
     return {"correct": is_correct, "correct_answer": quiz.correct_answer}
 
 # ───────────────────────────────────────────────────────────
-# DOCX → Quiz парсинг (алдын-ала қарау үшін)
+# DOCX → FRONT PREVIEW (ЕҢ МАҢЫЗДЫ: /api/parse-docx → { "questions": [...] })
 # ───────────────────────────────────────────────────────────
 @app.post("/api/parse-docx")
 async def parse_docx_endpoint(file: UploadFile = File(...), debug: bool = False):
     """
-    DOCX қабылдайды → гибрид парсинг → алдын-ала қарауға арналған тізім.
-    Қайтарады: {"quizzes": [{question, options, answer_index?}, ...]}
+    DOCX қабылдайды → сыртқы regex-парсинг → алдын-ала қарауға арналған тізім.
+    Қайтарады: {"questions": [{text, options}]}
     """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext != ".docx":
@@ -262,26 +269,37 @@ async def parse_docx_endpoint(file: UploadFile = File(...), debug: bool = False)
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
-        blocks = process_docx(tmp_path, debug=debug)  # ← біздің pipeline
+        # СЫРТҚЫ ПАРСЕР ҚОЛДАНЫЛАДЫ
+        blocks = process_docx(tmp_path, debug=debug)
 
-        # UI-ға жеңіл формат
-        quizzes = []
+        # FRONT-ке ыңғайлы формат (list comp ЖОҚ)
+        questions: List[dict] = []
         for b in (blocks or []):
             q = (b.get("question") or "").strip()
-            opts = [str(o).strip() for o in (b.get("options") or []) if str(o).strip()]
+
+            raw_opts = b.get("options") or []
+            opts: List[str] = []
+            for o in raw_opts:
+                s = str(o).strip()
+                if s:
+                    opts.append(s)
+
             if not q or len(opts) < 2:
                 continue
-            quizzes.append({
-                "question": q,
-                "options": opts,
-                "answer_index": b.get("answer_index"),  # бар болса — алдын-ала толады
-                "source": (b.get("meta") or {}).get("source"),
+
+            questions.append({
+                "text": q,
+                "options": opts
             })
 
-        if not quizzes:
-            raise HTTPException(status_code=400, detail="Сұрақ табылмады. Құжат форматын тексеріңіз.")
+        if not questions:
+            raise HTTPException(
+                status_code=400,
+                detail="Сұрақ табылмады. Құжатта нөмірден басталатын жолдар (мысалы, '1.' немесе '1)') "
+                       "және төменде 'a) ...' түріндегі нұсқалар барын тексеріңіз."
+            )
 
-        return {"quizzes": quizzes}
+        return {"questions": questions}
 
     except HTTPException:
         raise
@@ -304,11 +322,20 @@ def save_quizzes_bulk(topic_id: int, payload: BulkSaveRequest, db: Session = Dep
         raise HTTPException(status_code=404, detail="Тақырып табылмады")
 
     created_ids: List[int] = []
+
     for item in payload.quizzes:
-        question = item.question.strip()
-        options = [o.strip() for o in (item.options or []) if o and o.strip()]
+        question = (item.question or "").strip()
+
+        # options-ты циклмен тазалау
+        options: List[str] = []
+        raw = item.options or []
+        for o in raw:
+            s = (o or "").strip()
+            if s:
+                options.append(s)
+
         if not question or len(options) < 2:
-            # нашар блок — өткізіп жібереміз (UI-де алдын-ақ сүзілуі керек)
+            # нашар блок — өткізіп жібереміз (UI-де алдын-ақ сүзілуі тиіс)
             continue
 
         # Егер answer_index берілсе — сол арқылы дұрыс жауапты аламыз
@@ -333,15 +360,13 @@ def save_quizzes_bulk(topic_id: int, payload: BulkSaveRequest, db: Session = Dep
     db.commit()
     return {"message": f"{len(created_ids)} сұрақ сақталды ✅", "ids": created_ids}
 
-
-
-# Пайдалы модель
+# ───────────────────────────────────────────────────────────
+# Пайдалы модель: бірнеше тақырыптан емтихан үшін квиздер жиыны
+# ───────────────────────────────────────────────────────────
 class QuizByTopicsRequest(BaseModel):
     topic_ids: List[int]
     shuffle: bool = True
     limit: Optional[int] = None
-
-
 
 @app.post("/api/topics/{topic_id}/exam")
 def get_quizzes_by_topics(payload: QuizByTopicsRequest, db: Session = Depends(get_db)):
@@ -366,141 +391,140 @@ def get_quizzes_by_topics(payload: QuizByTopicsRequest, db: Session = Depends(ge
     if payload.limit:
         quizzes = quizzes[: payload.limit]
 
-    # options = "A;B;C;D" → List[str]
-    result = []
+    # options: JSON → List[str]
+    result: List[dict] = []
     for q in quizzes:
+        opts: List[str] = []
+        try:
+            opts = json.loads(q.options) if q.options else []
+        except Exception:
+            tmp = (q.options or "")
+            parts = tmp.split(";")
+            for p in parts:
+                sp = (p or "").strip()
+                if sp:
+                    opts.append(sp)
+
         result.append(
             {
                 "id": q.id,
                 "question": q.question,
-                "options": q.options.split(";"),
+                "options": opts,
             }
         )
 
     return {"count": len(result), "quizzes": result}
 
 
-class QuizCheckRequest(BaseModel):
-    selected_answer: str
+# ================== AUTH ENDPOINTS ==================
+@app.post("/api/register")
+def api_register(payload: RegisterIn, db: Session = Depends(get_db)):
+    return register_user(payload, db)
 
-@app.post("/api/topics/{topic_id}/check")
-def check_quiz_answer(quiz_id: int, req: QuizCheckRequest, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Сұрақ табылмады")
+@app.post("/api/verify")
+def api_verify(payload: VerifyIn, db: Session = Depends(get_db)):
+    return verify_user(payload, db)
 
-    correct = quiz.answer.strip() == req.selected_answer.strip()
-    return {"correct": correct, "correct_answer": quiz.answer}
-
-
-# ========================================================================
-security = HTTPBearer()
-
-
-def require_user(credentials: HTTPAuthorizationCredentials = Depends(security),
-                 db: Session = Depends(get_db)) -> User:
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Токен жарамсыз немесе мерзімі өткен")
-    username = payload.get("sub")
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Қолданушы табылмады")
-    return user
-
-# ───────────── Auth ─────────────
-@app.post("/api/auth/register")
-def register_user(payload: RegisterIn, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Бұл email тіркелген")
-    if db.query(User).filter(User.username == payload.username).first():
-        raise HTTPException(status_code=400, detail="Бұл username тіркелген")
-
-    user = User(
-        email=payload.email,
-        username=payload.username,
-        hashed_password=hash_password(payload.password),
-        is_verified=False,
-    )
-    db.add(user); db.commit(); db.refresh(user)
-
-    code = generate_code()
-    db.add(VerificationCode(user_id=user.id, code=code))
-    db.commit()
-
-    send_verification_email(payload.email, code)
-    return {"msg": "Email-ға код жіберілді"}
-
-@app.post("/api/auth/verify")
-def verify_user(payload: VerifyIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Қолданушы табылмады")
-
-    vc = (
-        db.query(VerificationCode)
-        .filter(VerificationCode.user_id == user.id)
-        .order_by(VerificationCode.id.desc())
-        .first()
-    )
-    if not vc:
-        raise HTTPException(status_code=400, detail="Код табылмады")
-    if vc.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Кодтың уақыты біткен")
-    if vc.code != payload.code:
-        raise HTTPException(status_code=400, detail="Код дұрыс емес")
-
-    user.is_verified = True
-    db.commit()
-    return {"msg": "Аккаунт расталды ✅"}
-
-@app.post("/api/auth/login", response_model=TokenOut)
-def login_user(payload: LoginIn, db: Session = Depends(get_db)):
+@app.post("/api/login")
+def api_login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
+    # Қолданушыны тексереміз
     user = db.query(User).filter(User.username == payload.username).first()
-    if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Қате логин немесе пароль")
-    if not user.is_verified:
-        raise HTTPException(status_code=403, detail="Email расталмаған")
+    if not user:
+        raise HTTPException(status_code=401, detail="Қолданушы табылмады")
 
-    access = create_access_token({"sub": user.username})
-    refresh = create_refresh_token({"sub": user.username})
-    return TokenOut(access_token=access, refresh_token=refresh)
+    from auth import verify_pw
+    if not verify_pw(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Құпия сөз қате")
 
-@app.get("/api/auth/me", response_model=UserOut)
-def get_me(user: User = Depends(require_user)):
-    return UserOut(
-        id=user.id, email=user.email, username=user.username, is_verified=user.is_verified
+    # Токендер жасау
+    access_token = create_token({"sub": user.email})
+    refresh_token = create_token({"sub": user.email, "type": "refresh"}, minutes=60*24*30)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {"id": user.id, "email": user.email, "username": user.username}
+    }
+
+@app.post("/api/resend-code")
+def api_resend_code(payload: ResendIn, db: Session = Depends(get_db)):
+    return resend_verification_code(payload, db)
+
+# ================== PROFILE ENDPOINTS ==================
+@app.get("/api/me")
+def get_profile_me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "username": current_user.username,
+        "name": getattr(current_user, "name", None),
+        "bio": getattr(current_user, "bio", None),
+        "avatar_url": getattr(current_user, "avatar_url", None)
+    }
+
+class ProfileUpdate(BaseModel):
+    name: str | None = None
+    bio: str | None = None
+    avatar_url: str | None = None
+
+@app.put("/api/profile")
+def update_profile(data: ProfileUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if data.name is not None:
+        current_user.name = data.name
+    if data.bio is not None:
+        current_user.bio = data.bio
+    if data.avatar_url is not None:
+        current_user.avatar_url = data.avatar_url
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+# ───────────────────────────────────────────────────────────
+# iQuiz ROUTES 
+# ───────────────────────────────────────────────────────────
+@app.post("/api/iquiz/create", response_model=RoomState)
+async def iquiz_create(req: CreateRoomRequest):
+    if req.room_code:
+        room_code = req.room_code.upper()
+    else:
+        room_code = "".join(random.choices("0123456789", k=6))
+    
+    room = await iquiz_manager.create_room(room_code)
+    if req.host_name and req.host_avatar:
+        await iquiz_manager.join_room(room.id, req.host_name, req.host_avatar)
+    return await iquiz_manager.get_state(room.id)
+
+@app.post("/api/iquiz/join", response_model=JoinResponse)
+async def iquiz_join(req: JoinRequest):
+    player = await iquiz_manager.join_room(req.room_code, req.name, req.avatar)
+    return JoinResponse(
+        playerId=player.id,
+        roomId=req.room_code,
+        name=player.name,
+        avatar=player.avatar,
     )
 
-@app.post("/api/auth/refresh", response_model=TokenOut)
-def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    payload = decode_refresh_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Refresh токен жарамсыз")
-    username = payload.get("sub")
-    access = create_access_token({"sub": username})
-    refresh = create_refresh_token({"sub": username})
-    return TokenOut(access_token=access, refresh_token=refresh)
 
-# ───────────── Activity ─────────────
-@app.post("/api/activity/add")
-def add_activity(body: ActivityAddIn, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    rec = UserActivity(user_id=user.id, action=body.action, meta=body.meta)
-    db.add(rec); db.commit(); db.refresh(rec)
-    return {"id": rec.id, "message": "Жазылды ✅"}
+@app.get("/api/iquiz/room/{room_id}/state", response_model=RoomState)
+async def iquiz_room_state(room_id: str):
+    state = await iquiz_manager.get_state(room_id.upper())
+    if not state.get("exists", True):
+        raise HTTPException(status_code=404, detail="Бөлме табылмады")
+    return state
 
-@app.get("/api/activity/me", response_model=List[ActivityOut])
-def my_activity(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    rows = (
-        db.query(UserActivity)
-        .filter(UserActivity.user_id == user.id)
-        .order_by(UserActivity.id.desc())
-        .limit(100)
-        .all()
-    )
-    out: List[ActivityOut] = []
-    for r in rows:
-        out.append(ActivityOut(id=r.id, action=r.action, meta=r.meta,
-                               created_at=r.created_at.isoformat()))
-    return out
+@app.websocket("/api/iquiz/ws/{room_id}")
+async def iquiz_ws(ws: WebSocket, room_id: str):
+    await ws.accept()
+    await iquiz_manager.attach_ws(room_id.upper(), ws)
+    try:
+        while True:
+            msg = await ws.receive_json()
+            if msg.get("type") == "ping":
+                await ws.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        await iquiz_manager.detach_ws(room_id.upper(), ws)
+    except Exception:
+        await iquiz_manager.detach_ws(room_id.upper(), ws)
+

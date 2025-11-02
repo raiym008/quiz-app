@@ -2,12 +2,11 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { FaArrowLeft, FaArrowRight, FaCheck, FaTimes, FaUndo, FaHome } from "react-icons/fa";
+import { API_BASE } from "../api/axiosClient";
 
 type QuizItem = { id: number; question: string; options: string[] };
 
-const API =
-  (import.meta as any).env?.VITE_API_URL?.replace(/\/$/, "") ||
-  "http://127.0.0.1:8000";
+const API = API_BASE
 
 export default function QuizSessionPage() {
   const { name } = useParams(); // пән slug (қазақша болуы мүмкін)

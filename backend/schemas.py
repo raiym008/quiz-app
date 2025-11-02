@@ -1,7 +1,7 @@
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr
 
-# ---- Auth in/out ----
+# ---- Auth input/output ----
 class RegisterIn(BaseModel):
     email: EmailStr
     username: str
@@ -20,19 +20,43 @@ class TokenOut(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
-class UserOut(BaseModel):
-    id: int
+class UserRegister(BaseModel):
     email: EmailStr
     username: str
-    is_verified: bool
+    password: str
 
-# ---- Activity ----
-class ActivityAddIn(BaseModel):
-    action: str
-    meta: Optional[str] = None
+class ResendIn(BaseModel):
+    email: EmailStr
 
-class ActivityOut(BaseModel):
-    id: int
-    action: str
-    meta: Optional[str]
-    created_at: str
+# ---- Quiz / Activity ----
+class SubjectCreate(BaseModel):
+    name: str
+
+class TopicCreate(BaseModel):
+    name: str
+
+class QuizCreate(BaseModel):
+    question: str
+    options: List[str]
+    correct_answer: Optional[str] = None
+
+# ===================================
+class CreateRoomRequest(BaseModel):
+    room_code: Optional[str] = None
+    host_name: Optional[str] = None
+    host_avatar: Optional[str] = None
+
+class JoinRequest(BaseModel):
+    room_code: str
+    name: str
+    avatar: str
+
+class JoinResponse(BaseModel):
+    playerId: str
+    roomId: str
+    name: str
+    avatar: str
+
+class RoomState(BaseModel):
+    roomId: str
+    players: List[dict]
