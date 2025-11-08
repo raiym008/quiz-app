@@ -1,0 +1,20 @@
+docx2python==3.5.0
+email-validator==2.3.0
+fastapi==0.116.1
+greenlet==3.2.4
+Jinja2==3.1.6
+MarkupSafe==3.0.2
+passlib==1.7.4
+pydantic==2.11.4
+pydantic_core==2.33.2
+python-dotenv==1.1.0
+python-jose==3.5.0
+python-multipart==0.0.20
+PyYAML==6.0.2
+sniffio==1.3.1
+SQLAlchemy==2.0.43
+starlette==0.47.2
+typing_extensions==4.14.1
+uvicorn==0.35.0
+watchfiles==1.0.3   # (жобада автоматты reload үшін қолданылуы мүмкін)
+websockets==15.0.1

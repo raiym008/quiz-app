@@ -1,6 +1,7 @@
 // src/pages/AdminPanel.tsx
+
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom"; // 🧭 Навигация
 import QuizEditor from "./quiz/QuizEditor";
 import AutomateQuiz from "./quiz/AutomateQuiz";
 import { API_BASE } from "../api/axiosClient";
@@ -16,13 +17,13 @@ type QuizQuestion = {
   id: number;
   text: string;
   options: QuizOption[];
-  correctAnswer?: number;
+  correctAnswer?: number; // QuizOption.id
 };
 
 /* =========================
    API
 ========================= */
-const API = API_BASE
+const API = API_BASE;
 const JSON_HEADERS: HeadersInit = { "Content-Type": "application/json" };
 
 /* =========================
@@ -30,29 +31,57 @@ const JSON_HEADERS: HeadersInit = { "Content-Type": "application/json" };
 ========================= */
 const TrashIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-    <path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <path
+      d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+    <path
+      d="M10 11v6M14 11v6"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
   </svg>
 );
+
 const FileIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-    <path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.5"/>
-    <path d="M13 3v5h5" stroke="currentColor" strokeWidth="1.5"/>
+    <path
+      d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <path d="M13 3v5h5" stroke="currentColor" strokeWidth="1.5" />
   </svg>
 );
-const Check = ({ className="w-3.5 h-3.5" }) => (
+
+const Check = ({ className = "w-3.5 h-3.5" }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-    <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    <path
+      d="M20 6 9 17l-5-5"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
-const PlusIcon = ({ className="w-4 h-4" }) => (
+
+const PlusIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
-    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    <path
+      d="M12 5v14M5 12h14"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
   </svg>
 );
 
 /* =========================
-   Cupertino Radio (minimal)
+   Cupertino Radio
 ========================= */
 function CupertinoRadio({ checked }: { checked: boolean }) {
   return (
@@ -62,14 +91,14 @@ function CupertinoRadio({ checked }: { checked: boolean }) {
         "w-5 h-5 rounded-full border",
         checked ? "border-blue-600" : "border-slate-300",
         "bg-white shadow-[0_1px_0_rgba(0,0,0,0.05)]",
-        "transition-colors"
+        "transition-colors",
       ].join(" ")}
       aria-hidden
     >
       <span
         className={[
           "w-2.5 h-2.5 rounded-full transition-transform",
-          checked ? "bg-blue-600 scale-100" : "bg-transparent scale-0"
+          checked ? "bg-blue-600 scale-100" : "bg-transparent scale-0",
         ].join(" ")}
       />
     </span>
@@ -87,25 +116,32 @@ function RadioRow({ name, checked, label, onChange }: RadioRowProps) {
   return (
     <label
       className={[
-        "group relative flex items-center gap-3 select-none",
-        "rounded-xl px-3 py-2",
-        "ring-1 ring-slate-200 bg-white/90 backdrop-blur",
-        "hover:bg-slate-50 hover:ring-slate-300",
-        "transition"
+        "group flex items-center gap-2 select-none",
+        "rounded-lg px-3 py-1.5",
+        "cursor-pointer text-sm",
+        "border transition-colors transition-shadow",
+        checked
+          ? "bg-sky-100/80 border-sky-300 shadow-[0_1px_3px_rgba(15,23,42,0.12)]"
+          : "bg-white/90 border-slate-200 hover:bg-slate-50 hover:border-slate-300",
       ].join(" ")}
     >
-      <input type="radio" name={name} checked={checked} onChange={onChange} className="peer sr-only" />
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        onChange={onChange}
+        className="sr-only"
+      />
       <CupertinoRadio checked={checked} />
-      <span className={["text-sm", checked ? "text-slate-900" : "text-slate-800"].join(" ")}>
+      <span className={checked ? "text-slate-900" : "text-slate-800"}>
         {label}
       </span>
-      <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-blue-600/0 peer-focus-visible:ring-blue-600/60" />
     </label>
   );
 }
 
 /* =========================
-   Clean Stepper
+   Stepper
 ========================= */
 function Stepper({ active }: { active: 1 | 2 | 3 }) {
   const steps = [
@@ -127,14 +163,20 @@ function Stepper({ active }: { active: 1 | 2 | 3 }) {
                 "ring-1",
                 isActive
                   ? "bg-slate-900 text-white ring-slate-900"
-                  : "bg-white text-slate-700 ring-slate-200"
+                  : "bg-white text-slate-700 ring-slate-200",
               ].join(" ")}
             >
-              <span className={[
-                "grid place-items-center w-5 h-5 rounded-full",
-                isActive ? "bg-white/20" : "bg-slate-100"
-              ].join(" ")}>
-                {isActive ? <Check className="text-white" /> : <span className="text-[11px] text-slate-700">{s.id}</span>}
+              <span
+                className={[
+                  "grid place-items-center w-5 h-5 rounded-full",
+                  isActive ? "bg-white/20" : "bg-slate-100",
+                ].join(" ")}
+              >
+                {isActive ? (
+                  <Check className="text-white" />
+                ) : (
+                  <span className="text-[11px] text-slate-700">{s.id}</span>
+                )}
               </span>
               <span>{s.title}</span>
             </div>
@@ -147,7 +189,7 @@ function Stepper({ active }: { active: 1 | 2 | 3 }) {
 }
 
 /* =========================
-   Tiny Toast (non-blocking)
+   Toast
 ========================= */
 type ToastKind = "success" | "error" | "info" | "warning";
 type Toast = { id: number; text: string; kind: ToastKind };
@@ -168,7 +210,7 @@ function ToastItem({ t }: { t: Toast }) {
    Main
 ========================= */
 export default function AdminPanel() {
-  const navigate = useNavigate();
+  const navigate = useNavigate(); // 🧭
 
   // Step 1: Subject
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -185,7 +227,7 @@ export default function AdminPanel() {
   const [options, setOptions] = useState<string[]>(["", "", "", ""]);
   const [correctIndex, setCorrectIndex] = useState<number>(0);
 
-  // Step 3B: File
+  // Step 3B: File + Auto
   const [mode, setMode] = useState<"manual" | "file">("file");
   const [parsedQuestions, setParsedQuestions] = useState<QuizQuestion[]>([]);
   const [parseLoading, setParseLoading] = useState(false);
@@ -195,14 +237,19 @@ export default function AdminPanel() {
 
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = (text: string, kind: ToastKind = "info", ms = 2600) => {
+  const pushToast = (
+    text: string,
+    kind: ToastKind = "info",
+    ms: number = 2600
+  ) => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, text, kind }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, ms);
+    window.setTimeout(
+      () => setToasts((prev) => prev.filter((t) => t.id !== id)),
+      ms
+    );
   };
-  
+
   const canProceedToQuiz = useMemo(
     () => !!selectedSubjectName && selectedTopicId !== null,
     [selectedSubjectName, selectedTopicId]
@@ -210,7 +257,7 @@ export default function AdminPanel() {
 
   /* -------- Load Subjects -------- */
   useEffect(() => {
-    fetch(`${API}/api/subjects`)
+    fetch(`${API}/subjects`)
       .then((r) => r.json())
       .then((data) => setSubjects(Array.isArray(data) ? data : []))
       .catch(() => setSubjects([]));
@@ -226,7 +273,7 @@ export default function AdminPanel() {
     const subjectUrl = encodeURIComponent(
       selectedSubjectName.toLowerCase().replace(/\s+/g, "-")
     );
-    fetch(`${API}/api/subjects/${subjectUrl}/topics`)
+    fetch(`${API}/subjects/${subjectUrl}/topics`)
       .then((r) => r.json())
       .then((data) => setTopics(Array.isArray(data) ? data : []))
       .catch(() => setTopics([]));
@@ -236,14 +283,17 @@ export default function AdminPanel() {
   const addSubject = async () => {
     const name = subjectName.trim();
     if (!name) return;
-    const res = await fetch(`${API}/api/subjects`, {
+    const res = await fetch(`${API}/subjects`, {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({ name }),
     });
     const data = await res.json();
     if (data?.id) {
-      setSubjects((prev) => [...prev, { id: data.id, name: data.name ?? name }]);
+      setSubjects((prev) => [
+        ...prev,
+        { id: data.id, name: data.name ?? name },
+      ]);
       setSubjectName("");
       setSelectedSubjectName(data.name ?? name);
       pushToast("Пән қосылды ✅", "success");
@@ -255,9 +305,17 @@ export default function AdminPanel() {
   const deleteSubject = async (id: number) => {
     const target = subjects.find((s) => s.id === id);
     if (!target) return;
-    if (!confirm(`"${target.name}" пәнін өшіреміз бе? Барлық тақырыптары мен quiz-дері де өшеді.`)) return;
+    if (
+      !confirm(
+        `"${target.name}" пәнін өшіреміз бе? Барлық тақырыптары мен quiz-дері де өшеді.`
+      )
+    )
+      return;
 
-    const res = await fetch(`${API}/api/subjects/${id}`, { method: "DELETE", headers: JSON_HEADERS });
+    const res = await fetch(`${API}/subjects/${id}`, {
+      method: "DELETE",
+      headers: JSON_HEADERS,
+    });
     if (!res.ok) {
       const msg = await res.json().catch(() => ({}));
       pushToast(msg?.detail || "Өшіру сәтсіз", "error");
@@ -276,8 +334,9 @@ export default function AdminPanel() {
   const addTopic = async () => {
     const tname = topicName.trim();
     if (!selectedSubjectName || !tname) return;
+
     const subjectUrl = encodeURIComponent(selectedSubjectName);
-    const res = await fetch(`${API}/api/subjects/${subjectUrl}/topics`, {
+    const res = await fetch(`${API}/subjects/${subjectUrl}/topics`, {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({ name: tname }),
@@ -297,9 +356,17 @@ export default function AdminPanel() {
   const deleteTopic = async (id: number) => {
     const target = topics.find((t) => t.id === id);
     if (!target) return;
-    if (!confirm(`"${target.name}" тақырыбын өшіреміз бе? Оның quiz-дері де өшеді.`)) return;
+    if (
+      !confirm(
+        `"${target.name}" тақырыбын өшіреміз бе? Оның quiz-дері де өшеді.`
+      )
+    )
+      return;
 
-    const res = await fetch(`${API}/api/topics/${id}`, { method: "DELETE", headers: JSON_HEADERS });
+    const res = await fetch(`${API}/topics/${id}`, {
+      method: "DELETE",
+      headers: JSON_HEADERS,
+    });
     if (!res.ok) {
       const msg = await res.json().catch(() => ({}));
       pushToast(msg?.detail || "Өшіру сәтсіз", "error");
@@ -310,23 +377,19 @@ export default function AdminPanel() {
     pushToast("Тақырып өшірілді", "success");
   };
 
-  /* -------- Manual: add/remove options -------- */
-  const addOption = () => {
-    setOptions((prev) => [...prev, ""]);
-  };
+  /* -------- Manual options -------- */
+  const addOption = () => setOptions((prev) => [...prev, ""]);
 
   const removeOption = (idx: number) => {
     setOptions((prev) => {
       if (prev.length <= 2) return prev;
       const next = [...prev];
       next.splice(idx, 1);
+
       if (correctIndex === idx) {
         setCorrectIndex(Math.max(0, next.length - 1));
-        return next;
-      }
-      if (correctIndex > idx) {
+      } else if (correctIndex > idx) {
         setCorrectIndex(correctIndex - 1);
-        return next;
       }
       return next;
     });
@@ -340,7 +403,7 @@ export default function AdminPanel() {
       return;
     }
 
-    const cleanOptions = options.map((o) => o.trim()).filter((o) => o);
+    const cleanOptions = options.map((o) => o.trim()).filter(Boolean);
     if (cleanOptions.length < 2) {
       pushToast("Кем дегенде 2 нұсқа болуы керек.", "warning");
       return;
@@ -350,7 +413,10 @@ export default function AdminPanel() {
       return;
     }
 
-    const safeIndex = Math.min(Math.max(0, correctIndex), cleanOptions.length - 1);
+    const safeIndex = Math.min(
+      Math.max(0, correctIndex),
+      cleanOptions.length - 1
+    );
     const correctAnswer = cleanOptions[safeIndex];
     if (!correctAnswer) {
       pushToast("Дұрыс жауапты таңдаңыз.", "warning");
@@ -358,38 +424,66 @@ export default function AdminPanel() {
     }
 
     const topicId = selectedTopicId!;
-    const payload = { question: question.trim(), options: cleanOptions, correct_answer: correctAnswer };
+    const payload = {
+      question: question.trim(),
+      options: cleanOptions,
+      correct_answer: correctAnswer,
+    };
 
-    const res = await fetch(`${API}/api/topics/${topicId}/quizzes`, {
+    const res = await fetch(`${API}/topics/${topicId}/quizzes`, {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (data?.message || res.ok) {
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
       setQuestion("");
       setOptions(["", "", "", ""]);
       setCorrectIndex(0);
       pushToast("Quiz қосылды ✅", "success");
+
+      // 🔁 Егер бір сұрақтық quiz аяқталса, қажет болса осында да бағыттауға болады:
+      // setTimeout(() => navigate("/"), 1500);
     } else {
       pushToast(data?.detail || "Quiz қосылмады", "error");
-      console.error("Quiz қосу қатесі:", data);
     }
   };
 
-  /* -------- File mode -------- */
+  /* =========================
+     FILE MODE + AUTO ANSWERS
+  ========================= */
+
+  // /api/parse-docx → { questions: [{ text, options, answer_index? }, ...] }
   function normalizeParsedToLocal(data: any): QuizQuestion[] {
     const raw = Array.isArray(data?.questions) ? data.questions : [];
     let QID = 1;
+
     return raw.map((q: any) => {
-      const text: string = String(q.text ?? "").trim();
+      const text: string = String(q.text ?? q.question ?? "").trim();
       const optsRaw = Array.isArray(q.options) ? q.options : [];
+
       let OID = 1;
       const options: QuizOption[] = optsRaw.map((o: any) => {
-        const t = typeof o === "string" ? o : String(o?.text ?? "");
+        const t =
+          typeof o === "string"
+            ? o
+            : o && typeof o.text === "string"
+            ? o.text
+            : String(o ?? "");
         return { id: OID++, text: t };
       });
-      return { id: QID++, text, options };
+
+      let correctAnswer: number | undefined = undefined;
+      if (
+        typeof q.answer_index === "number" &&
+        q.answer_index >= 0 &&
+        q.answer_index < options.length
+      ) {
+        correctAnswer = options[q.answer_index].id;
+      }
+
+      return { id: QID++, text, options, correctAnswer };
     });
   }
 
@@ -398,19 +492,46 @@ export default function AdminPanel() {
       pushToast("Алдымен пән мен тақырыпты таңдаңыз.", "warning");
       return;
     }
-    setParseError(null); setParseLoading(true);
-    setParsedQuestions([]); setSaveProgress(0);
+
+    setParseError(null);
+    setParseLoading(true);
+    setParsedQuestions([]);
+    setSaveProgress(0);
+
     try {
-      const form = new FormData(); form.append("file", file);
-      const res = await fetch(`${API}/api/parse-docx`, { method: "POST", body: form });
+      const form = new FormData();
+      form.append("file", file);
+
+      const res = await fetch(`${API}/parse-docx`, {
+        method: "POST",
+        body: form,
+      });
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.detail || "Файлды өңдеу мүмкін болмады.");
+        throw new Error(data?.detail || "Файлды өңдеу мүмкін болмады.");
       }
-      const data = await res.json();
+
       const normalized = normalizeParsedToLocal(data);
-      if (!normalized.length) setParseError("Сұрақ табылмады. Құжат форматын тексеріңіз.");
+      if (!normalized.length) {
+        setParseError(
+          "Сұрақ табылмады. Құжат форматын және кестедегі жауаптарды тексеріңіз."
+        );
+      }
       setParsedQuestions(normalized);
+
+      const autoCount = normalized.filter((q) => q.correctAnswer).length;
+      if (autoCount) {
+        pushToast(
+          `Кестеден ${autoCount} сұрақтың жауабы автоматты табылды ✅`,
+          "success"
+        );
+      } else if (normalized.length) {
+        pushToast(
+          "Сұрақтар танылды. Енді әр сұраққа дұрыс жауапты төменнен таңдай аласыз.",
+          "info"
+        );
+      }
     } catch (e: any) {
       setParseError(e?.message || "Белгісіз қате.");
     } finally {
@@ -420,10 +541,13 @@ export default function AdminPanel() {
 
   function handleAnswerSelect(questionId: number, optionId: number) {
     setParsedQuestions((prev) =>
-      prev.map((q) => (q.id === questionId ? { ...q, correctAnswer: optionId } : q))
+      prev.map((q) =>
+        q.id === questionId ? { ...q, correctAnswer: optionId } : q
+      )
     );
   }
 
+  // Барлығын бірден Quiz-ге сақтау + біткен соң негізгі бетке жіберу
   async function saveAllParsed() {
     if (!canProceedToQuiz) return;
     if (!parsedQuestions.length) {
@@ -431,58 +555,100 @@ export default function AdminPanel() {
       return;
     }
 
-    const notAnswered = parsedQuestions.filter((q) => !q.correctAnswer);
+    const notAnswered = parsedQuestions.filter(
+      (q) => q.correctAnswer === undefined
+    );
     if (notAnswered.length) {
-      pushToast(`Кем дегенде ${notAnswered.length} сұрақта дұрыс жауап таңдалмаған.`, "warning");
+      pushToast(
+        `Кем дегенде ${notAnswered.length} сұрақта дұрыс жауап таңдалмаған.`,
+        "warning"
+      );
       return;
     }
 
-    setSavingAll(true); setSaveProgress(0);
-    const topicId = selectedTopicId!; let saved = 0;
+    setSavingAll(true);
+    setSaveProgress(0);
+
+    const topicId = selectedTopicId!;
 
     try {
-      for (const q of parsedQuestions) {
-        const correct = q.options.find((o) => o.id === q.correctAnswer)!.text;
-        const payload = { question: q.text, options: q.options.map((o) => o.text), correct_answer: correct };
+      const quizzes = parsedQuestions.map((q) => {
+        const optionsTexts = q.options.map((o) => o.text);
+        const idx = q.options.findIndex((o) => o.id === q.correctAnswer);
+        return {
+          question: q.text,
+          options: optionsTexts,
+          answer_index: idx >= 0 ? idx : null,
+        };
+      });
 
-        const res = await fetch(`${API}/api/topics/${topicId}/quizzes`, {
-          method: "POST",
-          headers: JSON_HEADERS,
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const msg = await res.json().catch(() => ({}));
-          throw new Error(msg?.detail || "Сақтау қатесі");
-        }
-        saved += 1;
-        setSaveProgress(Math.round((saved / parsedQuestions.length) * 100));
+      const res = await fetch(`${API}/topics/${topicId}/quizzes/bulk`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ quizzes }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(
+          data?.detail || "Жаппай сақтау кезінде қате пайда болды."
+        );
       }
-      pushToast(`Барлығы ${saved} сұрақ сақталды ✅`, "success");
-      // Автоматты түрде /home бетіне өту
-      navigate("/home");
+
+      const savedCount = Array.isArray(data?.ids)
+        ? data.ids.length
+        : quizzes.length;
+
+      setSaveProgress(100);
+      pushToast(
+        `Автоматты түрде ${savedCount} сұрақ Quiz-ге сақталды ✅`,
+        "success"
+      );
+
+      // 🧭 МІНЕ БАСТЫСЫ: Барлығын сәтті сақтаған соң негізгі бетке бағыттаймыз
+      setTimeout(() => {
+        navigate("/home"); // Негізгі бет (қажет болса "/dashboard" қылып өзгерте аласың)
+      }, 1500);
+
+      setParsedQuestions([]);
+      setParseError(null);
+      setTimeout(() => setSaveProgress(0), 400);
     } catch (e: any) {
-      pushToast(e?.message || "Жаппай сақтау кезінде қате кетті.", "error");
+      pushToast(
+        e?.message || "Жаппай сақтау кезінде белгісіз қате пайда болды.",
+        "error"
+      );
     } finally {
       setSavingAll(false);
     }
   }
 
   function clearParsed() {
-    setParsedQuestions([]); setParseError(null); setSaveProgress(0);
+    setParsedQuestions([]);
+    setParseError(null);
+    setSaveProgress(0);
   }
 
   /* =========================
-     UI
+      UI
   ========================= */
-  const activeStep = (!selectedSubjectName ? 1 : selectedTopicId ? 3 : 2) as 1 | 2 | 3;
+  const activeStep = (!selectedSubjectName
+    ? 1
+    : selectedTopicId
+    ? 3
+    : 2) as 1 | 2 | 3;
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#f8fafc,white)] py-8 px-4">
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <header className="mb-6">
-          <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">Easy Admin</h1>
-          <p className="text-sm text-slate-600">Минимал және таза панель. Бірнеше қадаммен Quiz жаса.</p>
+          <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">
+            Easy Admin
+          </h1>
+          <p className="text-sm text-slate-600">
+            Минимал және таза панель. Бірнеше қадаммен Quiz жаса.
+          </p>
         </header>
 
         {/* Stepper */}
@@ -492,7 +658,9 @@ export default function AdminPanel() {
         <section className="rounded-2xl bg-white/90 backdrop-blur ring-1 ring-slate-200 shadow-sm p-5 mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium text-slate-900">Пән</h2>
-            <span className="text-xs text-slate-500">Алдымен пәнді таңда/қос</span>
+            <span className="text-xs text-slate-500">
+              Алдымен пәнді таңда/қос
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -502,7 +670,10 @@ export default function AdminPanel() {
               value={subjectName}
               onChange={(e) => setSubjectName(e.target.value)}
             />
-            <button className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2" onClick={addSubject}>
+            <button
+              className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2"
+              onClick={addSubject}
+            >
               Қосу
             </button>
             <select
@@ -512,7 +683,9 @@ export default function AdminPanel() {
             >
               <option value="">— Пәнді таңда —</option>
               {subjects.map((s) => (
-                <option key={s.id} value={s.name}>{s.name}</option>
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
               ))}
             </select>
           </div>
@@ -522,14 +695,25 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-700">
                   <tr>
-                    <th className="text-left font-medium px-4 py-2 w-24">ID</th>
+                    <th className="text-left font-medium px-4 py-2 w-24">
+                      ID
+                    </th>
                     <th className="text-left font-medium px-4 py-2">Пән</th>
-                    <th className="text-right font-medium px-4 py-2 w-28">Әрекет</th>
+                    <th className="text-right font-medium px-4 py-2 w-28">
+                      Әрекет
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {subjects.map((s) => (
-                    <tr key={s.id} className={selectedSubjectName === s.name ? "bg-blue-50/50" : ""}>
+                    <tr
+                      key={s.id}
+                      className={
+                        selectedSubjectName === s.name
+                          ? "bg-blue-50/50"
+                          : ""
+                      }
+                    >
                       <td className="px-4 py-2">#{s.id}</td>
                       <td className="px-4 py-2">{s.name}</td>
                       <td className="px-4 py-2 text-right">
@@ -550,10 +734,18 @@ export default function AdminPanel() {
         </section>
 
         {/* TOPIC */}
-        <section className={`rounded-2xl bg-white/90 backdrop-blur ring-1 ring-slate-200 shadow-sm p-5 mb-6 ${!selectedSubjectName ? "opacity-60 pointer-events-none" : ""}`}>
+        <section
+          className={`rounded-2xl bg-white/90 backdrop-blur ring-1 ring-slate-200 shadow-sm p-5 mb-6 ${
+            !selectedSubjectName ? "opacity-60 pointer-events-none" : ""
+          }`}
+        >
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium text-slate-900">Тақырып</h2>
-            <span className="text-xs text-slate-500">{selectedSubjectName ? `${selectedSubjectName} пәні` : "Алдымен пәнді таңдаңыз"}</span>
+            <span className="text-xs text-slate-500">
+              {selectedSubjectName
+                ? `${selectedSubjectName} пәні`
+                : "Алдымен пәнді таңдаңыз"}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -563,17 +755,26 @@ export default function AdminPanel() {
               value={topicName}
               onChange={(e) => setTopicName(e.target.value)}
             />
-            <button className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-2" onClick={addTopic}>
+            <button
+              className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-2"
+              onClick={addTopic}
+            >
               Қосу
             </button>
             <select
               className="w-full rounded-lg ring-1 ring-slate-300 focus:ring-2 focus:ring-blue-600 outline-none px-3 py-2 bg-white"
               value={selectedTopicId ?? ""}
-              onChange={(e) => setSelectedTopicId(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) =>
+                setSelectedTopicId(
+                  e.target.value ? Number(e.target.value) : null
+                )
+              }
             >
               <option value="">— Тақырыпты таңда —</option>
               {topics.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
               ))}
             </select>
           </div>
@@ -583,14 +784,27 @@ export default function AdminPanel() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-700">
                   <tr>
-                    <th className="text-left font-medium px-4 py-2 w-24">ID</th>
-                    <th className="text-left font-medium px-4 py-2">Тақырып</th>
-                    <th className="text-right font-medium px-4 py-2 w-28">Әрекет</th>
+                    <th className="text-left font-medium px-4 py-2 w-24">
+                      ID
+                    </th>
+                    <th className="text-left font-medium px-4 py-2">
+                      Тақырып
+                    </th>
+                    <th className="text-right font-medium px-4 py-2 w-28">
+                      Әрекет
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {topics.map((t) => (
-                    <tr key={t.id} className={selectedTopicId === t.id ? "bg-blue-50/50" : ""}>
+                    <tr
+                      key={t.id}
+                      className={
+                        selectedTopicId === t.id
+                          ? "bg-blue-50/50"
+                          : ""
+                      }
+                    >
                       <td className="px-4 py-2">#{t.id}</td>
                       <td className="px-4 py-2">{t.name}</td>
                       <td className="px-4 py-2 text-right">
@@ -611,18 +825,30 @@ export default function AdminPanel() {
         </section>
 
         {/* QUIZ */}
-        <section className={`rounded-2xl bg-white/90 backdrop-blur ring-1 ring-slate-200 shadow-sm p-5 ${!canProceedToQuiz ? "opacity-60 pointer-events-none" : ""}`}>
+        <section
+          className={`rounded-2xl bg-white/90 backdrop-blur ring-1 ring-slate-200 shadow-sm p-5 ${
+            !canProceedToQuiz ? "opacity-60 pointer-events-none" : ""
+          }`}
+        >
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium text-slate-900">Quiz</h2>
             <div className="inline-flex rounded-lg ring-1 ring-slate-300 overflow-hidden">
               <button
-                className={`px-3 py-1.5 text-sm font-medium ${mode === "file" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                className={`px-3 py-1.5 text-sm font-medium ${
+                  mode === "file"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-slate-700 hover:bg-slate-50"
+                }`}
                 onClick={() => setMode("file")}
               >
                 Файл
               </button>
               <button
-                className={`px-3 py-1.5 text-sm font-medium ${mode === "manual" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                className={`px-3 py-1.5 text-sm font-medium ${
+                  mode === "manual"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-slate-700 hover:bg-slate-50"
+                }`}
                 onClick={() => setMode("manual")}
               >
                 Қолмен
@@ -633,15 +859,15 @@ export default function AdminPanel() {
           {/* Manual */}
           {mode === "manual" && (
             <div className="space-y-4">
-              <div>
-                <div className="rounded-xl ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-blue-600">
-                  <QuizEditor value={question} onChange={setQuestion} />
-                </div>
+              <div className="rounded-xl ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-blue-600">
+                <QuizEditor value={question} onChange={setQuestion} />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-700">Нұсқалар</label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Нұсқалар
+                  </label>
                   <button
                     type="button"
                     onClick={addOption}
@@ -690,12 +916,21 @@ export default function AdminPanel() {
               <div className="text-sm text-slate-700">
                 <strong>Дұрыс жауап:</strong>{" "}
                 <span className="font-semibold text-emerald-700">
-                  {`Нұсқа ${String.fromCharCode(65 + Math.min(correctIndex, Math.max(0, options.length - 1)))}`}
+                  {`Нұсқа ${String.fromCharCode(
+                    65 +
+                      Math.min(
+                        correctIndex,
+                        Math.max(0, options.length - 1)
+                      )
+                  )}`}
                 </span>
               </div>
 
               <div className="flex justify-end">
-                <button onClick={saveQuiz} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">
+                <button
+                  onClick={saveQuiz}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                >
                   Сақтау
                 </button>
               </div>
@@ -712,7 +947,9 @@ export default function AdminPanel() {
                       <FileIcon className="w-4 h-4 text-slate-600" />
                     </span>
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900">DOCX импорт</h3>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        DOCX импорт
+                      </h3>
                     </div>
                   </div>
                 </div>
@@ -727,8 +964,16 @@ export default function AdminPanel() {
                   />
                 </div>
 
-                {parseLoading && <div className="mt-3 text-sm text-blue-700 bg-blue-50 ring-1 ring-blue-200 rounded-lg px-3 py-2">Файл өңделуде…</div>}
-                {parseError && <div className="mt-3 text-sm text-rose-700 bg-rose-50 ring-1 ring-rose-200 rounded-lg px-3 py-2">{parseError}</div>}
+                {parseLoading && (
+                  <div className="mt-3 text-sm text-blue-700 bg-blue-50 ring-1 ring-blue-200 rounded-lg px-3 py-2">
+                    Файл өңделуде…
+                  </div>
+                )}
+                {parseError && (
+                  <div className="mt-3 text-sm text-rose-700 bg-rose-50 ring-1 ring-rose-200 rounded-lg px-3 py-2">
+                    {parseError}
+                  </div>
+                )}
               </div>
 
               {parsedQuestions.length > 0 && (
@@ -741,10 +986,21 @@ export default function AdminPanel() {
                       </span>
                     </h4>
                     <div className="flex gap-2">
-                      <button onClick={clearParsed} className="px-3 py-1.5 rounded-lg ring-1 ring-slate-300 hover:bg-slate-50 text-slate-700">
+                      <button
+                        onClick={clearParsed}
+                        className="px-3 py-1.5 rounded-lg ring-1 ring-slate-300 hover:bg-slate-50 text-slate-700"
+                      >
                         Тазалау
                       </button>
-                      <button onClick={saveAllParsed} disabled={savingAll} className={`px-3 py-1.5 rounded-lg text-white ${savingAll ? "bg-emerald-500/70 cursor-wait" : "bg-emerald-600 hover:bg-emerald-700"}`}>
+                      <button
+                        onClick={saveAllParsed}
+                        disabled={savingAll}
+                        className={`px-3 py-1.5 rounded-lg text-white ${
+                          savingAll
+                            ? "bg-emerald-500/70 cursor-wait"
+                            : "bg-emerald-600 hover:bg-emerald-700"
+                        }`}
+                      >
                         {savingAll ? "Сақталуда…" : "Барлығын сақтау"}
                       </button>
                     </div>
@@ -752,14 +1008,31 @@ export default function AdminPanel() {
 
                   {savingAll && (
                     <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-                      <div className="h-full bg-emerald-600 transition-all" style={{ width: `${saveProgress}%` }} />
+                      <div
+                        className="h-full bg-emerald-600 transition-all"
+                        style={{ width: `${saveProgress}%` }}
+                      />
                     </div>
                   )}
 
                   <ul className="space-y-3">
                     {parsedQuestions.map((q) => (
-                      <li key={q.id} className="rounded-xl ring-1 ring-slate-200 bg-white/90 backdrop-blur p-4">
-                        <p className="font-medium text-slate-900 mb-3">{q.text || <em className="text-slate-500">[Бос сұрақ]</em>}</p>
+                      <li
+                        key={q.id}
+                        className={[
+                          "rounded-xl p-4",
+                          "bg-sky-50/70 border border-sky-100",
+                          "shadow-sm",
+                        ].join(" ")}
+                      >
+                        <p className="font-medium text-slate-900 mb-2">
+                          {q.text || (
+                            <em className="text-slate-500">
+                              [Бос сұрақ]
+                            </em>
+                          )}
+                        </p>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           {q.options.map((opt) => (
                             <RadioRow
@@ -767,13 +1040,31 @@ export default function AdminPanel() {
                               name={`question-${q.id}`}
                               checked={q.correctAnswer === opt.id}
                               label={opt.text}
-                              onChange={() => handleAnswerSelect(q.id, opt.id)}
+                              onChange={() =>
+                                handleAnswerSelect(q.id, opt.id)
+                              }
                             />
                           ))}
                         </div>
-                        <div className={`mt-2 text-xs inline-flex items-center gap-1 px-2 py-1 rounded-lg ring-1 ${q.correctAnswer ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
-                          <Check className={`w-3.5 h-3.5 ${q.correctAnswer ? "text-emerald-600" : "text-amber-600"}`} />
-                          {q.correctAnswer ? "Дұрыс жауап таңдалды" : "Дұрыс жауапты таңдаңыз"}
+
+                        <div
+                          className={[
+                            "mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs",
+                            q.correctAnswer !== undefined
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border border-amber-200",
+                          ].join(" ")}
+                        >
+                          <Check
+                            className={
+                              q.correctAnswer !== undefined
+                                ? "w-3.5 h-3.5 text-emerald-600"
+                                : "w-3.5 h-3.5 text-amber-600"
+                            }
+                          />
+                          {q.correctAnswer !== undefined
+                            ? "Дұрыс жауап таңдалды"
+                            : "Дұрыс жауапты таңдаңыз"}
                         </div>
                       </li>
                     ))}
@@ -785,7 +1076,7 @@ export default function AdminPanel() {
         </section>
       </div>
 
-      {/* Toast container (overlay) */}
+      {/* Toast container */}
       <div
         aria-live="polite"
         className="fixed top-4 right-4 z-50 flex flex-col gap-2"
