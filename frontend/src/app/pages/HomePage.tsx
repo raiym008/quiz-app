@@ -1,7 +1,7 @@
-// src/pages/HomePage.tsx
+// src/app/pages/HomePage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE } from "../api/axiosClient";
+import axiosClient from "../api/axiosClient";
 
 type Subject = { id: number; name: string };
 
@@ -12,10 +12,8 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
 
-  // ---- Helpers
-  const toKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "-");
+  const uid = localStorage.getItem("user_id");
 
-  // Бірдей түсті ұстап тұру үшін — атаудан детерминдік түс таңдау
   const colorPool = [
     "bg-blue-100 text-blue-700 ring-blue-200",
     "bg-emerald-100 text-emerald-700 ring-emerald-200",
@@ -30,12 +28,9 @@ export default function HomePage() {
     const sum = Array.from(name).reduce((a, c) => a + c.charCodeAt(0), 0);
     return colorPool[sum % colorPool.length];
   };
-
-  // Тақырып әрпі (көбіне бірінші әріп жеткілікті)
   const initial = (name: string) =>
     name.trim().charAt(0).toUpperCase() || "∎";
 
-  // Query-ды белгілеп көрсету (match highlight)
   const MarkMatch = ({ text, q }: { text: string; q: string }) => {
     if (!q) return <>{text}</>;
     const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -51,21 +46,27 @@ export default function HomePage() {
     );
   };
 
-  // ---- Load
+  // 🔥 НАЗАР: axiosClient қолданамыз, fetch емес
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetch(`${API_BASE}/subjects`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Пәндер жүктелмеді");
-        return res.json();
-      })
-      .then((data) => setSubjects(Array.isArray(data) ? data : []))
-      .catch((e) => setError(e.message || "Қате"))
-      .finally(() => setLoading(false));
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await axiosClient.get("/subjects");
+        setSubjects(Array.isArray(res.data) ? res.data : []);
+      } catch (e: any) {
+        if (e?.response?.status === 401) {
+          setError("Сессия аяқталды. Қайта кіріңіз.");
+        } else {
+          setError("Пәндер жүктелмеді.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, []);
 
-  // ---- Filter + stable sort (әліпби бойынша)
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const arr = q
@@ -76,16 +77,14 @@ export default function HomePage() {
     );
   }, [subjects, query]);
 
-  // Enter басқанда — бірінші табылған пәнді бірден ашу
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (filtered.length > 0) {
-      const slug = encodeURIComponent(toKey(filtered[0].name));
-      navigate(`/subjects/${slug}/topics`);
-    }
+    if (!uid || filtered.length === 0) return;
+    const first = filtered[0];
+    // ✅ ID арқылы барамыз
+    navigate(`/u/${uid}/subjects/${first.id}/topics`);
   };
 
-  // ---- Inline SVG (икондар)
   const SearchIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
     <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
       <path
@@ -108,26 +107,21 @@ export default function HomePage() {
     </svg>
   );
 
-  // ---- UI
   return (
     <div className="min-h-screen bg-white">
-      {/* Topbar */}
-      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 backdrop-blur">
         <div className="mx-auto max-w-5xl px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
             Пәндер
           </h1>
-
-          {/* Оң жақ: сан + "Құру" батырмасы */}
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-500">
               Барлығы: <b>{subjects.length}</b>
             </span>
             <button
               type="button"
-              onClick={() => navigate("/quiz-jasau")}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium ring-1 ring-slate-300 text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 transition"
-              aria-label="Жаңа квиз құру"
+              onClick={() => uid && navigate(`/u/${uid}/quiz-jasau`)}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium ring-1 ring-slate-300 text-slate-700 hover:bg-slate-50"
             >
               Құру
             </button>
@@ -135,29 +129,21 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Content */}
       <main className="mx-auto max-w-5xl px-4 py-6">
-        {/* Search (үлкен, айқын) */}
         <form onSubmit={onSubmit} className="mb-6">
-          <label htmlFor="q" className="sr-only">
-            Пәнді іздеу
-          </label>
           <div className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 pointer-events-none">
               <SearchIcon />
             </div>
             <input
-              id="q"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Пәнді іздеу… (Информатика, Математика, Тарих)"
-              autoComplete="off"
-              className="w-full pl-11 pr-28 py-3 rounded-xl ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-600 outline-none text-slate-900 placeholder:text-slate-400 bg-white"
+              placeholder="Пәнді іздеу…"
+              className="w-full pl-11 pr-28 py-3 rounded-xl ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-600 bg-white text-slate-900"
             />
             <button
               type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition"
-              aria-label="Бірінші нәтижені ашу"
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
             >
               Ашу
             </button>
@@ -167,7 +153,6 @@ export default function HomePage() {
           </div>
         </form>
 
-        {/* States */}
         {loading && (
           <ul className="space-y-3" aria-hidden>
             {Array.from({ length: 8 }).map((_, i) => (
@@ -189,36 +174,26 @@ export default function HomePage() {
           <div className="rounded-xl bg-slate-50 ring-1 ring-slate-200 px-6 py-10 text-center text-slate-600">
             <div className="text-5xl mb-2">🔎</div>
             Сәйкес пән табылмады.
-            <div className="text-sm mt-1">
-              Кілт сөзді қысқартып көріңіз (мыс: <b>информатика</b>, <b>математика</b>,{" "}
-              <b>тарих</b>).
-            </div>
           </div>
         )}
 
-        {/* List (УЛЬТРА ҚАРАПАЙЫМ ТҮСІНІКТІ) */}
         {!loading && !error && filtered.length > 0 && (
-          <nav
-            aria-label="Пәндер тізімі"
-            className="divide-y divide-slate-200/70 rounded-xl ring-1 ring-slate-200 bg-white"
-          >
+          <nav className="divide-y divide-slate-200/70 rounded-xl ring-1 ring-slate-200 bg-white">
             {filtered.map((s) => {
-              const slug = encodeURIComponent(toKey(s.name));
               const color = colorFor(s.name);
               return (
                 <button
                   key={s.id}
-                  onClick={() => navigate(`/subjects/${slug}/topics`)}
-                  className="w-full text-left px-4 py-4 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 transition flex items-center gap-4"
-                  aria-label={`${s.name} пәнін ашу`}
+                  onClick={() =>
+                    uid && navigate(`/u/${uid}/subjects/${s.id}/topics`)
+                  }
+                  className="w-full text-left px-4 py-4 hover:bg-slate-50 flex items-center gap-4"
                 >
-                  {/* Аватар-инициал (ірі, анық) */}
                   <div
                     className={`w-12 h-12 grid place-items-center rounded-xl ring ${color} text-lg font-bold`}
                   >
                     {initial(s.name)}
                   </div>
-                  {/* Атауы + шағын түсініктеме */}
                   <div className="min-w-0 flex-1">
                     <div className="text-slate-900 text-lg font-semibold truncate">
                       <MarkMatch text={s.name} q={query} />
@@ -227,8 +202,7 @@ export default function HomePage() {
                       Басу арқылы тақырыптарға өтіңіз
                     </div>
                   </div>
-                  {/* Оң жақ көрсеткіш */}
-                  <div className="text-slate-300 group-hover:text-slate-500">
+                  <div className="text-slate-300">
                     <ChevronRight />
                   </div>
                 </button>

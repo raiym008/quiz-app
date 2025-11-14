@@ -1,54 +1,99 @@
-import { Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import toast from "react-hot-toast";
+import { Navigate, useParams } from "react-router-dom";
 
-/**
- * Қорғалған беттерге арналған маршрут.
- * Егер access_token жоқ болса — /login бетіне қайтарады.
- * Егер токен бар, бірақ тексеру жүріп жатса — жүктеу спиннерін көрсетеді.
- */
+const ACCESS_KEY = "access_token";
+const REFRESH_KEY = "refresh_token";
+const USER_KEY = "user";
+const USER_ID_KEY = "user_id";
+
+// Барлық сессия деректерін тазалау
+function clearSession() {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(USER_ID_KEY);
+}
+
+// JWT expiry тексеру
+function isJwtValid(token: string | null): boolean {
+  if (!token) return false;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+
+    const payload = JSON.parse(atob(parts[1]));
+    const expMs = payload?.exp ? payload.exp * 1000 : 0;
+
+    if (!expMs) return false;
+    return Date.now() < expMs;
+  } catch {
+    return false;
+  }
+}
+
+// Локал сессиядан мәлімет оқу
+function readAuth() {
+  const token = localStorage.getItem(ACCESS_KEY);
+  const uid = localStorage.getItem(USER_ID_KEY);
+  const user = localStorage.getItem(USER_KEY);
+
+  if (!token || !uid || !user) {
+    clearSession();
+    return { ok: false, uid: null as string | null };
+  }
+
+  if (!isJwtValid(token)) {
+    clearSession();
+    return { ok: false, uid: null };
+  }
+
+  return { ok: true, uid };
+}
+
 export default function ProtectedRoute({ children }: { children: JSX.Element }) {
+  const { userId: routeId } = useParams(); // /u/:userId сияқты маршруттар үшін
   const [checking, setChecking] = useState(true);
-  const [isAuth, setIsAuth] = useState(false);
+  const [ok, setOk] = useState(false);
+  const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      setIsAuth(false);
-      setChecking(false);
-      return;
-    }
-
-    // Егер токен бар болса, оны жай тексеріп өтеміз (мысалы, localStorage-та сақталған)
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      const exp = payload?.exp ? payload.exp * 1000 : 0;
-      if (Date.now() > exp) {
-        toast.error("Сессия уақыты аяқталды. Қайта кіріңіз 🔐");
-        localStorage.removeItem("access_token");
-        setIsAuth(false);
-      } else {
-        setIsAuth(true);
-      }
-    } catch {
-      setIsAuth(false);
-    } finally {
-      setChecking(false);
-    }
+    const { ok, uid } = readAuth();
+    setOk(ok);
+    setUid(uid);
+    setChecking(false);
   }, []);
 
+  // Жүктелу күйі (дизайнды жеңіл ұстаймыз)
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-600 text-lg">
-        <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mr-3"></div>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 14,
+          color: "#9ca3af",
+          background:
+            "radial-gradient(1200px 800px at -10% -10%, #e8eefc 0%, transparent 60%) no-repeat, #f5f7fb",
+        }}
+      >
         Жүктелуде...
       </div>
     );
   }
 
-  if (!isAuth) {
+  // Сессия жоқ немесе жарамсыз → логинге
+  if (!ok || !uid) {
     return <Navigate to="/login" replace />;
   }
 
+  // Егер маршрут /u/:userId түрінде болса:
+  // бөтен id енгізілсе, автоматты түрде өз id-іне бұрамыз
+  if (routeId && routeId !== uid) {
+    return <Navigate to={`/u/${uid}`} replace />;
+  }
+
+  // Барлық шарттар орындалды → protected контентті көрсетеміз
   return children;
 }

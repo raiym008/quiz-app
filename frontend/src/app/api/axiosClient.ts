@@ -6,7 +6,7 @@ export const API_BASE = API_URL
 export const WS_BASE = WebSocket_BASE
 
 const axiosClient = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_BASE, // API_BASE = API_URL
   headers: { "Content-Type": "application/json" },
 });
 
@@ -35,3 +35,4 @@ axiosClient.interceptors.response.use(
 );
 
 export default axiosClient;
+console.log("API_BASE =", API_BASE)

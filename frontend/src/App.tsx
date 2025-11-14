@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
 import { Toaster } from "react-hot-toast";
 
-// Беттер (нақты барларын ғана қалдыр)
+import MainPage from "./app/pages/MainPage";
 import HomePage from "./app/pages/HomePage";
 import AdminPanel from "./app/admin/AdminPanel";
 import TopicsPage from "./app/pages/TopicsPage";
@@ -11,55 +12,123 @@ import RegisterPage from "./app/auth/RegisterPage";
 import LoginPage from "./app/auth/LoginPage";
 import VerifyPage from "./app/auth/VerifyPage";
 import ProtectedRoute from "./app/auth/ProtectedRoute";
-import ProfilePage from "./app/pages/ProfilePage";
-import MainPage from "./app/pages/MainPage";
-
-import WaitingRoom from "./app/modes/iQuiz/WaitingRoom";
-import JoinRoom from "./app/modes/iQuiz/JoinRoom";
-import ExamSetup from "./app/modes/iQuiz/ExamSetup";
-import StudentWaitingRoom from "./app/modes/iQuiz/StudentWaitingRoom";
 
 import Test from "../test";
+import { useAuthStore } from "./app/api/authStore";
+
+import FeedbackManager from "./app/feedback/FeedbackManager";
+import NetworkGuard from "./app/NetworkGuard";
+
+// /home, /account -> әрқашан ағымдағы user-ге редирект
+function RedirectToMyAccount() {
+  const user = useAuthStore((s) => s.user);
+
+  if (user?.id) {
+    return <Navigate to={`/u/${user.id}`} replace />;
+  }
+
+  return <Navigate to="/login" replace />;
+}
 
 export default function App() {
+  const hydrate = useAuthStore((s) => s.hydrate);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
   return (
     <>
+      <NetworkGuard/>
+
       <BrowserRouter>
         <Routes>
-          {/* 🌍 Ашық маршруттар */}
+          {/* Паблик беттер */}
           <Route path="/" element={<MainPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify" element={<VerifyPage />} />
 
-          <Route path="/iquiz/waiting/:roomId" element={<WaitingRoom />} />
-          <Route path="/iquiz/join" element={<JoinRoom/>}/>
-          <Route path="/iquiz/start" element={<ExamSetup/>}/>
-          <Route path="/iquiz/room/:roomId" element={<StudentWaitingRoom/>}/>
+          {/* ====== ҚОРҒАЛҒАН РОУТТАР: /u/:userId/... ====== */}
 
-          {/* 🔒 Қорғалған маршруттар */}
-          <Route path="/home" element={<ProtectedRoute><HomePage/></ProtectedRoute>} />
-          <Route path="/quiz-jasau" element={<ProtectedRoute><AdminPanel/></ProtectedRoute>} />
-          <Route path="/topics/:id/quizzes" element={<ProtectedRoute><QuizPage/></ProtectedRoute>} />
-          <Route path="/subjects/:name/topics" element={<ProtectedRoute><TopicsPage/></ProtectedRoute>} />
-          <Route path="/account" element={<ProtectedRoute><ProfilePage/></ProtectedRoute>} />
+          {/* Негізгі дашборд */}
+          <Route
+            path="/u/:userId"
+            element={
+              <ProtectedRoute>
+                <HomePage />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* 🚫 Белгісіз маршрут */}
+          {/* Quiz жасау беті */}
+          <Route
+            path="/u/:userId/quiz-jasau"
+            element={
+              <ProtectedRoute>
+                <AdminPanel />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Тақырыпқа тиесілі Quiz-дер */}
+          <Route
+            path="/u/:userId/topics/:id/quizzes"
+            element={
+              <ProtectedRoute>
+                <QuizPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Пән -> Тақырыптар */}
+          <Route
+            path="/u/:userId/subjects/:subjectId/topics"
+            element={
+              <ProtectedRoute>
+                <TopicsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Ескі /home және /account → ағымдағы user */}
+          <Route
+            path="/home"
+            element={
+              <ProtectedRoute>
+                <RedirectToMyAccount />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/account"
+            element={
+              <ProtectedRoute>
+                <RedirectToMyAccount />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Info / test */}
+          <Route path="/info" element={<Test />} />
+
+          {/* Белгісіз роуттар → басты бет */}
           <Route path="*" element={<Navigate to="/" replace />} />
-
-          <Route path="/info" element={<Test/>}/>
         </Routes>
+
+        <FeedbackManager/>
+
       </BrowserRouter>
 
-      {/* 🔔 Toast хабарламалар */}
+      {/* Toast конфигурациясы */}
       <Toaster
         position="top-right"
         toastOptions={{
-          duration: 3000,
+          duration: 6000,
           style: {
             borderRadius: "12px",
             background: "#fff",
-            color: "#333",
+            color: "#111827",
             boxShadow: "0 4px 14px rgba(0,0,0,0.1)",
           },
           success: { iconTheme: { primary: "#22c55e", secondary: "#fff" } },

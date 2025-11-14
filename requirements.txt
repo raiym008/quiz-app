@@ -16,5 +16,5 @@ SQLAlchemy==2.0.43
 starlette==0.47.2
 typing_extensions==4.14.1
 uvicorn==0.35.0
-watchfiles==1.0.3   # (жобада автоматты reload үшін қолданылуы мүмкін)
+watchfiles==1.0.3 
 websockets==15.0.1

@@ -3,8 +3,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import random
 
-SENDER_EMAIL = "raiym0809@gmail.com"  # ← өз email енгіз
-APP_PASSWORD = "vpop lcay nvzx pavn"  # ← Gmail app password енгіз
+SENDER_EMAIL = "easyquizkz@gmail.com"  # ← өз email енгіз
+APP_PASSWORD = "vpfa jwpk uypo joww"  # ← Gmail app password енгіз
 
 def generate_code():
     return str(random.randint(100000, 999999))

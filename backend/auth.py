@@ -1,171 +1,393 @@
-from datetime import datetime, timedelta
-from fastapi import HTTPException, Request
-from sqlalchemy.orm import Session
-from passlib.context import CryptContext
+# auth.py
+"""
+Supabase-only авторизация логикасы + email_sender арқылы код жіберу.
 
-from models import User, VerificationCode, UserActivity
+Күтілетін кестелер (Supabase):
+
+1) users
+   - id              : bigint, primary key
+   - email           : text, unique
+   - username        : text, unique
+   - hashed_password : text
+   - is_verified     : boolean, default false
+   - created_at      : timestamptz, default now()
+   - (қаласаң name, bio, avatar_url қосуға болады)
+
+2) verification_codes
+   - id         : bigint, primary key
+   - user_id    : bigint, references users(id) ON DELETE CASCADE
+   - code       : text
+   - expires_at : timestamptz
+
+Email жіберу үшін email_sender.py файлы қолданылады:
+   - generate_code() -> "123456"
+   - send_verification_email(email, code)
+"""
+
+from datetime import datetime, timedelta, timezone
+
+from fastapi import HTTPException
+
+from database import supabase
 from email_sender import generate_code, send_verification_email
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ===================== Көмекші =====================
+
+def _hash_pw(password: str) -> str:
+    """
+    Қарапайым SHA256-хеш.
+    Прод үшін bcrypt/argon2 қолданған дұрыс.
+    """
+    import hashlib
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def hash_pw(pw: str) -> str:
-    return pwd_ctx.hash(pw)
+def _verify_pw(password: str, hashed: str) -> bool:
+    return _hash_pw(password) == hashed
 
-def verify_pw(pw: str, hashed: str) -> bool:
-    return pwd_ctx.verify(pw, hashed)
 
-# ---- ішкі көмекші: код шығару/жазу (commit етпейді!)
-def _issue_verification_code(db: Session, user_id: int) -> str:
-    code = generate_code()
-    rec = VerificationCode(
-        user_id=user_id,
-        code=code,
-        expires_at=datetime.utcnow() + timedelta(minutes=10),
-    )
-    db.add(rec)
-    return code
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
-def register_user(payload, db: Session):
-    """Жартылай тіркелуді болдырмайтын, бірақ double transaction қателігін тудырмайтын нұсқа."""
+
+def _exec(query, ctx: str = ""):
+    """
+    Supabase сұранысын қауіпсіз орындау.
+    supabase-py v2 форматына сай:
+    - Қате болса → Exception тастайды (try/except ұстаймыз)
+    - Сәтті болса → res.data қайтарамыз
+    """
     try:
-        # Duplicate check
-        existing = db.query(User).filter(
-            (User.email == payload.email) | (User.username == payload.username)
-        ).first()
-
-        if existing and existing.is_verified:
-            raise HTTPException(status_code=400, detail="User already exists")
-
-        # Егер бұрын тіркеліп, бірақ верификацияланбаған болса — қайта код жібереміз
-        if existing and not existing.is_verified:
-            code = generate_code()
-            db.query(VerificationCode).filter(VerificationCode.user_id == existing.id).delete()
-            db.add(VerificationCode(
-                user_id=existing.id,
-                code=code,
-                expires_at=datetime.utcnow() + timedelta(minutes=10),
-            ))
-            db.commit()
-            try:
-                send_verification_email(existing.email, code)
-            except Exception as e:
-                print("❌ Email жіберу қатесі:", e)
-            return {"message": "User exists but not verified. New code sent."}
-
-        # Жаңа user тіркеу
-        new_user = User(
-            email=payload.email,
-            username=payload.username,
-            hashed_password=hash_pw(payload.password),
-            is_verified=False,
-            created_at=datetime.utcnow(),
+        res = query.execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase error{f' ({ctx})' if ctx else ''}: {e}",
         )
-        db.add(new_user)
-        db.flush()  # id алу үшін commit етпей
+
+    data = getattr(res, "data", None)
+    if data is None and isinstance(res, dict):
+        data = res.get("data")
+
+    return data
+
+
+def _send_code(email: str, code: str, ctx: str):
+    """
+    Email жіберуді бөлек ұстап аламыз.
+    Егер email жіберілмей қалса да, жүйе құламасын:
+    тек print арқылы логтаймыз.
+    """
+    try:
+        send_verification_email(email, code)
+    except Exception as e:
+        # Мұнда production-да logging қолданған дұрыс
+        print(f"❌ Email send error ({ctx}): {e}")
+
+
+# ===================== Тіркелу =====================
+
+def register_user(payload):
+    """
+    Тіркелу:
+
+    1) email/username бос емес
+    2) Егер fully verified user бар → 400
+    3) Егер user бар, бірақ is_verified = False → кодты жаңарту + email жіберу
+    4) Егер user жоқ → жаңа user + верификация коды + email жіберу
+    """
+
+    email = (payload.email or "").strip().lower()
+    username = (payload.username or "").strip()
+    password = (payload.password or "").strip()
+
+    if not email or not username or not password:
+        raise HTTPException(status_code=400, detail="Деректер толық емес.")
+
+    # 1) Осындай email/username бар ма?
+    existing = _exec(
+        supabase.table("users")
+        .select("id,is_verified")
+        .or_(f"email.eq.{email},username.eq.{username}"),
+        ctx="check existing user",
+    )
+
+
+    # ── Егер бар болса
+    if existing:
+        user = existing[0]
+
+        # Толық расталған қолданушы → қайта тіркеуге болмайды
+        if user.get("is_verified"):
+            raise HTTPException(
+                status_code=400,
+                detail="Бұл email немесе username бұрын қолданылған.",
+            )
+
+        # Расталмаған қолданушы → ескі кодтарды өшіріп, жаңасын жібереміз
+        user_id = user["id"]
+
+        _exec(
+            supabase.table("verification_codes")
+            .delete()
+            .eq("user_id", user_id),
+            ctx="cleanup old codes (register existing)",
+        )
 
         code = generate_code()
-        db.add(VerificationCode(
-            user_id=new_user.id,
-            code=code,
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
-        ))
+        exp = _now_utc() + timedelta(minutes=10)
 
-        try:
-            send_verification_email(new_user.email, code)
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(status_code=500, detail=f"Email send failed: {e}")
+        _exec(
+            supabase.table("verification_codes").insert(
+                {
+                    "user_id": user_id,
+                    "code": code,
+                    "expires_at": exp.isoformat(),
+                }
+            ),
+            ctx="insert new code (register existing)",
+        )
 
-        db.commit()
-        return {"message": "User registered successfully. Verification email sent."}
+        _send_code(email, code, ctx="register existing user")
 
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "message": (
+                "Бұл email бұрын тіркелген, бірақ расталмаған. "
+                "Жаңа растау коды email-ге жіберілді."
+            )
+        }
 
+    # ── Жаңа қолданушы ────────────────────────────────
+    hashed = _hash_pw(password)
 
-
-def verify_user(payload, db: Session):
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    rec = (
-        db.query(VerificationCode)
-        .filter(VerificationCode.user_id == user.id, VerificationCode.code == payload.code)
-        .order_by(VerificationCode.id.desc())
-        .first()
+    ins = _exec(
+        supabase.table("users").insert(
+            {
+                "email": email,
+                "username": username,
+                "hashed_password": hashed,
+                "is_verified": False,
+                "created_at": _now_utc().isoformat(),
+            }
+        ),
+        ctx="insert new user",
     )
-    if not rec:
-        raise HTTPException(status_code=400, detail="Invalid code")
-    if rec.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Code expired")
 
-    user.is_verified = True
-    db.commit()
-    return {"message": "Email verified successfully ✅"}
+    if not ins:
+        raise HTTPException(
+            status_code=500,
+            detail="Қолданушыны тіркеу мүмкін болмады.",
+        )
+
+    user_id = ins[0]["id"]
+
+    # Растау коды
+    code = generate_code()
+    exp = _now_utc() + timedelta(minutes=10)
+
+    _exec(
+        supabase.table("verification_codes").insert(
+            {
+                "user_id": user_id,
+                "code": code,
+                "expires_at": exp.isoformat(),
+            }
+        ),
+        ctx="insert verify code (new user)",
+    )
+
+    _send_code(email, code, ctx="register new user")
+
+    return {
+        "message": "Тіркелу сәтті өтті. Растау коды email-ге жіберілді.",
+        "user": {
+            "id": user_id,
+            "email": email,
+            "username": username,
+        },
+    }
 
 
-def login_user(payload, request: Request, db: Session, create_token_fn):
+# ===================== Email растау =====================
+
+def verify_user(payload):
     """
-    Бұрынғыдай login логикасы (қысқаша):
-    - username/password тексеру
-    - құрылғы лимитін сақтау (UserActivity)
-    - access/refresh токен жасау (create_token_fn қолданамыз)
+    Email + код арқылы аккаунтты растау.
     """
-    user = db.query(User).filter(User.username == payload.username).first()
-    if not user or not verify_pw(payload.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    # құрылғы лимиті: 3
-    sessions = db.query(UserActivity).filter(
-        UserActivity.user_id == user.id, UserActivity.action == "LOGIN"
-    ).all()
-    if len(sessions) >= 3:
-        oldest = sorted(sessions, key=lambda s: s.created_at)[0]
-        db.delete(oldest)
-        db.commit()
+    email = (payload.email or "").strip().lower()
+    code = (payload.code or "").strip()
 
-    db.add(UserActivity(
-        user_id=user.id,
-        action="LOGIN",
-        meta=request.headers.get("user-agent")
-    ))
-    db.commit()
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Email немесе код бос.")
 
-    access = create_token_fn({"sub": user.email}, minutes=15)
-    refresh = create_token_fn({"sub": user.email, "type": "refresh"}, minutes=43200)
-    return {"access_token": access, "refresh_token": refresh, "token_type": "bearer"}
+    # Қолданушыны табу
+    users = _exec(
+        supabase.table("users")
+        .select("id,is_verified")
+        .eq("email", email),
+        ctx="find user (verify)",
+    )
 
+    if not users:
+        raise HTTPException(status_code=404, detail="Қолданушы табылмады.")
 
-# === 🆕 ҚАЙТА ЖІБЕРУ КОДЫ: logic/атауларды өзгертпей, бөлек функция ретінде
-def resend_verification_code(payload, db: Session):
-    """
-    Email-ға жаңа растау кодын қайта жібереді.
-    - Бар user-ді email бойынша табу
-    - Егер верификацияланып қойған болса — қате
-    - Бұрынғы кодтарды өшіру, жаңасын беру (10 минут)
-    - Commit -> email жіберу
-    """
-    user = db.query(User).filter(User.email == payload.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.is_verified:
-        raise HTTPException(status_code=400, detail="User already verified")
+    user = users[0]
+    user_id = user["id"]
 
-    # ескі кодтарды тазалау және жаңасын шығару
-    db.query(VerificationCode).filter(VerificationCode.user_id == user.id).delete()
-    code = _issue_verification_code(db, user.id)
-    db.commit()  # register_user-дағы "existing not verified" бранчына ұқсас тәртіп
+    # Кодты табу
+    records = _exec(
+        supabase.table("verification_codes")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("code", code)
+        .order("id", desc=True)
+        .limit(1),
+        ctx="find verify code",
+    )
+
+    if not records:
+        raise HTTPException(status_code=400, detail="Қате код.")
+
+    rec = records[0]
+
+    raw_expires = rec.get("expires_at")
+    if not raw_expires:
+        raise HTTPException(status_code=400, detail="Код уақыты дұрыс емес.")
 
     try:
-        send_verification_email(user.email, code)
-    except Exception as e:
-        # Мұнда да бұрынғы үлгіге сай: қатені логқа жазып, жалпы ағынды үзбей қоямыз
-        print("❌ Email жіберу қатесі:", e)
+        expires_at = datetime.fromisoformat(str(raw_expires).replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Код уақыты дұрыс емес.")
 
-    return {"message": "Verification code resent."}
+    if expires_at < _now_utc():
+        raise HTTPException(status_code=400, detail="Кодтың уақыты өтіп кеткен.")
+
+    # User-ді verified қыламыз
+    _exec(
+        supabase.table("users")
+        .update({"is_verified": True})
+        .eq("id", user_id),
+        ctx="set user verified",
+    )
+
+    # Қаласаң, қолданылған кодтарды өшіруге болады:
+    # _exec(
+    #     supabase.table("verification_codes").delete().eq("user_id", user_id),
+    #     ctx="cleanup codes after verify",
+    # )
+
+    return {"message": "Аккаунт сәтті расталды ✅"}
+
+
+# ===================== Растау кодын қайта жіберу =====================
+
+def resend_verification_code(payload):
+    """
+    Расталмаған аккаунтқа жаңа код жіберу.
+    """
+
+    email = (payload.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email бос.")
+
+    users = _exec(
+        supabase.table("users")
+        .select("id,is_verified")
+        .eq("email", email),
+        ctx="find user (resend)",
+    )
+
+    if not users:
+        raise HTTPException(status_code=404, detail="Қолданушы табылмады.")
+
+    user = users[0]
+    user_id = user["id"]
+
+    if user.get("is_verified"):
+        raise HTTPException(
+            status_code=400,
+            detail="Бұл аккаунт бұрыннан расталған.",
+        )
+
+    # Ескі кодтарды өшіру
+    _exec(
+        supabase.table("verification_codes")
+        .delete()
+        .eq("user_id", user_id),
+        ctx="cleanup old codes (resend)",
+    )
+
+    # Жаңа код
+    code = generate_code()
+    exp = _now_utc() + timedelta(minutes=10)
+
+    _exec(
+        supabase.table("verification_codes").insert(
+            {
+                "user_id": user_id,
+                "code": code,
+                "expires_at": exp.isoformat(),
+            }
+        ),
+        ctx="insert new code (resend)",
+    )
+
+    _send_code(email, code, ctx="resend verify code")
+
+    return {"message": "Жаңа растау коды email-ге жіберілді."}
+
+
+# ===================== Логин =====================
+
+def login_user(payload):
+    """
+    Логин:
+    - username + password
+    - is_verified == True
+    - Дұрыс болса → {"user": {...}}
+    JWT токен main.py ішінде жасалады.
+    """
+
+    username = (payload.username or "").strip()
+    password = (payload.password or "").strip()
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Логин немесе пароль бос.")
+
+    users = _exec(
+        supabase.table("users")
+        .select("id,email,username,hashed_password,is_verified")
+        .eq("username", username)
+        .limit(1),
+        ctx="login find user",
+    )
+
+    if not users:
+        raise HTTPException(
+            status_code=401,
+            detail="Қате логин немесе құпия сөз.",
+        )
+
+    user = users[0]
+
+    if not _verify_pw(password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Қате логин немесе құпия сөз.",
+        )
+
+    if not user.get("is_verified"):
+        raise HTTPException(
+            status_code=403,
+            detail="Алдымен email-ді растаңыз.",
+        )
+
+    return {
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "username": user["username"],
+        }
+    }

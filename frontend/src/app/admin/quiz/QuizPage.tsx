@@ -55,7 +55,7 @@ function safeMarkdown(md: string): string {
     return `\u0000EM${i}\u0000`;
   });
 
-  // басқа жұлдызшаларды эскейптейміз
+  // қалған жұлдызшаларды эскейптейміз
   s = s.replace(/\*/g, "\\*");
 
   // restore
@@ -84,8 +84,10 @@ export default function QuizPage() {
 
   // Навигация/жауап күйі
   const [current, setCurrent] = useState(0);
-  const [selections, setSelections] = useState<(number|null)[]>([]); // әр сұрақтың таңдауы
+  const [selections, setSelections] = useState<(number | null)[]>([]);
   const selectedIndex = selections[current] ?? null;
+
+  const uid = localStorage.getItem("user_id");
 
   // Финал
   const [finished, setFinished]   = useState(false);
@@ -94,17 +96,25 @@ export default function QuizPage() {
   const [rows, setRows]           = useState<FinalRow[]>([]);
   const [score, setScore]         = useState(0);
 
-  /* ---------------- Quizzes load */
+  /* ---------------- Quizzes load (with auth) ---------------- */
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`${API}/topics/${id}/quizzes`)
+
+    const token = localStorage.getItem("access_token");
+    const headers: HeadersInit = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+
+    fetch(`${API}/topics/${id}/quizzes`, { headers })
       .then((r) => {
         if (!r.ok) throw new Error("Сұрақтар жүктелмеді");
         return r.json();
       })
       .then((data) => setQuizzes(Array.isArray(data) ? data : []))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Белгісіз қате"))
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : "Белгісіз қате")
+      )
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -120,35 +130,39 @@ export default function QuizPage() {
     }
   }, [quizzes.length]);
 
-  /* ---------------- Helpers */
-  const goTo = useCallback((idx: number) => {
-    if (idx < 0 || idx >= quizzes.length) return;
-    setCurrent(idx);
-  }, [quizzes.length]);
+  /* ---------------- Helpers ---------------- */
+  const goTo = useCallback(
+    (idx: number) => {
+      if (idx < 0 || idx >= quizzes.length) return;
+      setCurrent(idx);
+    },
+    [quizzes.length]
+  );
 
-  // ✅ Стандартты мінез: қайта басса — таңдаудан алынады (toggle)
+  // toggle select
   const choose = (idx: number) => {
     setSelections((prev) => {
       const next = [...prev];
-      next[current] = (next[current] === idx ? null : idx);
+      next[current] = next[current] === idx ? null : idx;
       return next;
     });
   };
 
   const next = useCallback(() => {
     if (current + 1 < quizzes.length) goTo(current + 1);
-    else setFinished(true); // соңғы сұрақтан кейін аяқтау
+    else setFinished(true);
   }, [current, quizzes.length, goTo]);
 
   const back = useCallback(() => {
     if (current > 0) goTo(current - 1);
   }, [current, goTo]);
 
-  /* ---------------- Пернетақтамен басқару (←/→) */
+  /* ---------------- Пернетақтамен басқару (←/→) ---------------- */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (finished) return; // нәтижеде стрелка өшіріледі
+      if (finished) return;
       if (isEditableTarget(e.target)) return;
+
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         back();
@@ -157,41 +171,55 @@ export default function QuizPage() {
         next();
       }
     };
+
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [back, next, finished]);
 
-  /* ---------------- API: single check (index-пен бірге) */
+  /* ---------------- API: single check ---------------- */
   const checkAnswer = async (
     quizId: number,
     selected_index: number | null,
     selected_answer?: string
   ): Promise<CheckResult> => {
     try {
-      const r = await fetch(`${API}/api/quizzes/${quizId}/check`, {
+      const token = localStorage.getItem("access_token");
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      // API_BASE = ".../api", сондықтан мұнда қосымша /api қоспаймыз
+      const r = await fetch(`${API}/quizzes/${quizId}/check`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ selected_index, selected_answer }),
       });
+
       if (!r.ok) throw new Error("Жауапты тексеру мүмкін болмады");
       const data = (await r.json()) as CheckResult;
+
       return {
         correct: !!data.correct,
         correct_answer: data.correct_answer,
-        correct_index: typeof data.correct_index === "number" ? data.correct_index : undefined,
+        correct_index:
+          typeof data.correct_index === "number"
+            ? data.correct_index
+            : undefined,
       };
     } catch {
       return { correct: false };
     }
   };
 
-  /* ---------------- Final verify once */
+  /* ---------------- Final verify once ---------------- */
   useEffect(() => {
     const run = async () => {
       if (!finished || checked || quizzes.length === 0) return;
       setVerifying(true);
       try {
-        // базалық кесте
         const base: FinalRow[] = quizzes.map((q, i) => {
           const selIdx = selections[i];
           const selAns = selIdx !== null ? q.options[selIdx] : undefined;
@@ -205,20 +233,23 @@ export default function QuizPage() {
           };
         });
 
-        // тек жауап берілгендерге тексеріс
         const checkedRows = await Promise.all(
           base.map(async (row) => {
             if (row.selected_index === null || !row.selected_answer) return row;
-            const { correct, correct_answer, correct_index } = await checkAnswer(
-              row.quiz_id,
-              row.selected_index,
-              row.selected_answer
-            );
+
+            const { correct, correct_answer, correct_index } =
+              await checkAnswer(
+                row.quiz_id,
+                row.selected_index,
+                row.selected_answer
+              );
 
             const resolvedCorrectIndex =
               typeof correct_index === "number" && correct_index >= 0
                 ? correct_index
-                : (row.options?.findIndex((o) => o === (correct_answer ?? "__NA__")) ?? -1);
+                : row.options?.findIndex(
+                    (o) => o === (correct_answer ?? "__NA__")
+                  ) ?? -1;
 
             return {
               ...row,
@@ -236,6 +267,7 @@ export default function QuizPage() {
         setVerifying(false);
       }
     };
+
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finished, checked]);
@@ -249,7 +281,7 @@ export default function QuizPage() {
     setScore(0);
   };
 
-  /* ---------------- Render states */
+  /* ---------------- Render states ---------------- */
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-gradient-to-b from-slate-50 to-sky-50 text-slate-600">
@@ -257,6 +289,7 @@ export default function QuizPage() {
       </div>
     );
   }
+
   if (error) {
     return (
       <div className="min-h-screen grid place-items-center bg-gradient-to-b from-rose-50 to-orange-50/30">
@@ -266,6 +299,7 @@ export default function QuizPage() {
       </div>
     );
   }
+
   if (quizzes.length === 0) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 text-slate-600">
@@ -274,9 +308,9 @@ export default function QuizPage() {
     );
   }
 
-  /* ---------------- Finished page */
+  /* ---------------- Finished page ---------------- */
   if (finished) {
-    const total   = quizzes.length;
+    const total = quizzes.length;
     const percent = Math.round((score / total) * 100);
 
     return (
@@ -287,13 +321,17 @@ export default function QuizPage() {
             <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white/15 blur-2xl" />
             <div className="flex flex-wrap items-center justify-between gap-6 relative z-10">
               <div>
-                <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Нәтиже</h1>
+                <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
+                  Нәтиже
+                </h1>
                 <p className="opacity-90 mt-1">Тақырып бойынша қорытынды</p>
               </div>
               <div className="grid place-items-center">
                 <div className="w-28 h-28 md:w-32 md:h-32 rounded-full bg-white/20 ring-2 ring-white/50 shadow-inner grid place-items-center">
                   <div className="text-center">
-                    <div className="text-3xl md:text-4xl font-black leading-none">{percent}%</div>
+                    <div className="text-3xl md:text-4xl font-black leading-none">
+                      {percent}%
+                    </div>
                     <div className="text-xs opacity-90 mt-1">дәлдік</div>
                   </div>
                 </div>
@@ -317,17 +355,30 @@ export default function QuizPage() {
               return (
                 <div
                   key={`${r.quiz_id}-${idx}`}
-                  className={`rounded-2xl shadow-sm border p-5 md:p-6 bg-white/90 backdrop-blur
-                              ${ok ? "border-emerald-200" : "border-rose-200"}`}
+                  className={`rounded-2xl shadow-sm border p-5 md:p-6 bg-white/90 backdrop-blur ${
+                    ok
+                      ? "border-emerald-200"
+                      : "border-rose-200"
+                  }`}
                 >
                   <div className="flex items-start gap-4">
-                    <div className={`w-2 rounded-full mt-0.5 self-stretch ${ok ? "bg-emerald-500" : "bg-rose-500"}`} aria-hidden />
+                    <div
+                      className={`w-2 rounded-full mt-0.5 self-stretch ${
+                        ok ? "bg-emerald-500" : "bg-rose-500"
+                      }`}
+                      aria-hidden
+                    />
                     <div className="flex-1">
                       {/* Question */}
                       <div className="prose prose-slate max-w-none">
                         <div className="text-slate-900 font-semibold text-base md:text-lg">
                           {idx + 1}.{" "}
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              p: ({ children }) => <span>{children}</span>,
+                            }}
+                          >
                             {safeMarkdown(r.question)}
                           </ReactMarkdown>
                         </div>
@@ -335,9 +386,16 @@ export default function QuizPage() {
 
                       {/* Correct answer */}
                       <div className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-1.5 ring-1 ring-emerald-200">
-                        <span className="text-emerald-700 text-sm font-medium">Дұрыс жауап:</span>
+                        <span className="text-emerald-700 text-sm font-medium">
+                          Дұрыс жауап:
+                        </span>
                         <span className="text-emerald-700 text-sm font-semibold prose prose-slate max-w-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              p: ({ children }) => <span>{children}</span>,
+                            }}
+                          >
                             {r.correct_answer ?? "—"}
                           </ReactMarkdown>
                         </span>
@@ -346,42 +404,78 @@ export default function QuizPage() {
                       {/* Your answer */}
                       <div className="mt-2 text-sm text-slate-700">
                         Сіздің жауабыңыз:{" "}
-                        <span className={`${ok ? "text-emerald-600" : "text-rose-600"} font-semibold prose prose-slate max-w-none`}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
-                            {r.selected_index !== null ? (r.selected_answer ?? "—") : "— Жауап берілмеген"}
+                        <span
+                          className={`${
+                            ok
+                              ? "text-emerald-600"
+                              : "text-rose-600"
+                          } font-semibold prose prose-slate max-w-none`}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              p: ({ children }) => <span>{children}</span>,
+                            }}
+                          >
+                            {r.selected_index !== null
+                              ? r.selected_answer ?? "—"
+                              : "— Жауап берілмеген"}
                           </ReactMarkdown>
                         </span>
-                        {r.selected_index !== null && !ok && <span className="text-rose-600 font-semibold ms-2">— Қате</span>}
+                        {r.selected_index !== null && !ok && (
+                          <span className="text-rose-600 font-semibold ms-2">
+                            — Қате
+                          </span>
+                        )}
                       </div>
 
                       {/* Option chips */}
-                      {Array.isArray(r.options) && r.options.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {r.options.map((opt, optIdx) => {
-                            const isUser    = optIdx === r.selected_index;
-                            const isCorrect = optIdx === (r.correct_index ?? -1);
+                      {Array.isArray(r.options) &&
+                        r.options.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {r.options.map((opt, optIdx) => {
+                              const isUser =
+                                optIdx ===
+                                r.selected_index;
+                              const isCorrect =
+                                optIdx ===
+                                (r.correct_index ?? -1);
 
-                            let cls = "px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-700";
-                            if (isCorrect) {
-                              cls = "px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border-emerald-200";
-                            }
-                            if (!isCorrect && isUser && !ok) {
-                              cls = "px-3 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700 border-rose-200";
-                            }
-                            if (isUser && ok) {
-                              cls = "px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border-emerald-200";
-                            }
+                              let cls =
+                                "px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-700";
+                              if (isCorrect) {
+                                cls =
+                                  "px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border-emerald-200";
+                              }
+                              if (!isCorrect && isUser && !ok) {
+                                cls =
+                                  "px-3 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700 border-rose-200";
+                              }
+                              if (isUser && ok) {
+                                cls =
+                                  "px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border-emerald-200";
+                              }
 
-                            return (
-                              <span key={`${r.quiz_id}-opt-${optIdx}`} className={cls}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
-                                  {safeMarkdown(opt)}
-                                </ReactMarkdown>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
+                              return (
+                                <span
+                                  key={`${r.quiz_id}-opt-${optIdx}`}
+                                  className={cls}
+                                >
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      p: ({ children }) => (
+                                        <span>{children}</span>
+                                      ),
+                                    }}
+                                  >
+                                    {safeMarkdown(opt)}
+                                  </ReactMarkdown>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -398,7 +492,7 @@ export default function QuizPage() {
               Қайта тапсыру
             </button>
             <Link
-              to="/"
+              to={`/u/${uid}`}
               className="px-5 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-medium shadow-sm hover:bg-slate-50 transition"
             >
               Басты бетке
@@ -409,7 +503,7 @@ export default function QuizPage() {
     );
   }
 
-  /* ---------------- Quiz in progress (main page) */
+  /* ---------------- Quiz in progress (main page) ---------------- */
   const q = quizzes[current];
 
   return (
@@ -417,7 +511,10 @@ export default function QuizPage() {
       <div className="mx-auto max-w-4xl bg-white/95 backdrop-blur border border-slate-100 rounded-3xl shadow-md p-6 md:p-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <Link to="/home" className="text-slate-600 hover:text-sky-600 inline-flex items-center gap-2">
+          <Link
+            to="/home"
+            className="text-slate-600 hover:text-sky-600 inline-flex items-center gap-2"
+          >
             <span aria-hidden>←</span>
             Артқа
           </Link>
@@ -426,8 +523,11 @@ export default function QuizPage() {
           </span>
         </div>
 
-        {/* Numbered navigator — жеңіл стиль, «жауап берілді» үшін ✓ бейдж */}
-        <nav aria-label="Сұрақтар тізімі" className="mb-5 overflow-x-auto">
+        {/* Numbered navigator */}
+        <nav
+          aria-label="Сұрақтар тізімі"
+          className="mb-5 overflow-x-auto"
+        >
           <div className="flex gap-2 min-w-max">
             {quizzes.map((_, i) => {
               const answered = selections[i] !== null;
@@ -435,10 +535,18 @@ export default function QuizPage() {
 
               let cls =
                 "relative inline-flex items-center justify-center w-9 h-9 rounded-full text-[13px] font-medium transition-all duration-200";
+
               if (isCurrent) {
-                cls += " bg-sky-500 text-white shadow ring-4 ring-sky-200";
+                // Таңдалған сұрақ — ақшыл көк фон
+                cls +=
+                  " bg-sky-100 text-sky-700 border border-sky-400 shadow-sm";
+              } else if (answered) {
+                // Жауап берілген сұрақ — өте жеңіл көк
+                cls +=
+                  " bg-sky-50 text-sky-700 border border-sky-200";
               } else {
-                cls += " bg-white text-slate-700 border border-slate-200 hover:bg-slate-50";
+                cls +=
+                  " bg-white text-slate-700 border border-slate-200 hover:bg-slate-50";
               }
 
               return (
@@ -446,7 +554,9 @@ export default function QuizPage() {
                   key={`nav-${i}`}
                   className={cls}
                   onClick={() => goTo(i)}
-                  aria-current={isCurrent ? "page" : undefined}
+                  aria-current={
+                    isCurrent ? "page" : undefined
+                  }
                   title={`Сұрақ ${i + 1}`}
                 >
                   {i + 1}
@@ -464,17 +574,24 @@ export default function QuizPage() {
           </div>
         </nav>
 
-        {/* Прогресс сызығы жоқ */}
-
         {/* Question */}
         <h2 className="text-lg md:text-xl font-semibold text-slate-900 mb-5 prose prose-slate max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <span>{children}</span>,
+            }}
+          >
             {safeMarkdown(q.question)}
           </ReactMarkdown>
         </h2>
 
-        {/* Options — radio-like with toggle off */}
-        <div role="radiogroup" aria-label="Жауап нұсқалары" className="grid gap-3">
+        {/* Options */}
+        <div
+          role="radiogroup"
+          aria-label="Жауап нұсқалары"
+          className="grid gap-3"
+        >
           {q.options.map((opt, i) => {
             const isSelected = selectedIndex === i;
 
@@ -482,25 +599,42 @@ export default function QuizPage() {
               <button
                 key={`${q.id}-opt-${i}`}
                 onClick={() => choose(i)}
-                className={`w-full text-left px-4 py-3 rounded-2xl transition ring-1
-                  ${isSelected
+                className={`w-full text-left px-4 py-3 rounded-2xl transition ring-1 ${
+                  isSelected
                     ? "bg-sky-500 text-white ring-sky-400 shadow"
-                    : "bg-slate-50 hover:bg-slate-100 text-slate-800 ring-slate-200"}`}
+                    : "bg-slate-50 hover:bg-slate-100 text-slate-800 ring-slate-200"
+                }`}
                 aria-pressed={isSelected}
                 aria-checked={isSelected}
                 role="radio"
               >
                 <div className="flex items-center gap-3">
                   <span
-                    className={`inline-flex items-center justify-center shrink-0 w-5 h-5 rounded-full ring-1
-                      ${isSelected ? "bg-white text-sky-600 ring-sky-300" : "bg-white ring-slate-300"}`}
+                    className={`inline-flex items-center justify-center shrink-0 w-5 h-5 rounded-full ring-1 ${
+                      isSelected
+                        ? "bg-white text-sky-600 ring-sky-300"
+                        : "bg-white ring-slate-300"
+                    }`}
                     aria-hidden
                   >
-                    <span className={`block w-2.5 h-2.5 rounded-full ${isSelected ? "bg-sky-600" : "bg-transparent"}`} />
+                    <span
+                      className={`block w-2.5 h-2.5 rounded-full ${
+                        isSelected
+                          ? "bg-sky-600"
+                          : "bg-transparent"
+                      }`}
+                    />
                   </span>
 
                   <div className="prose prose-slate max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <span>{children}</span> }}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => (
+                          <span>{children}</span>
+                        ),
+                      }}
+                    >
                       {safeMarkdown(opt)}
                     </ReactMarkdown>
                   </div>
@@ -510,7 +644,7 @@ export default function QuizPage() {
           })}
         </div>
 
-        {/* Controls: Back / Next or Finish */}
+        {/* Controls */}
         <div className="mt-8 flex items-center justify-between gap-3">
           <button
             onClick={back}
@@ -532,9 +666,15 @@ export default function QuizPage() {
                 ? "bg-sky-500 hover:bg-sky-600 shadow"
                 : "bg-emerald-600 hover:bg-emerald-700 shadow"
             }`}
-            title={current + 1 < quizzes.length ? "Келесі сұрақ (→)" : "Тестті аяқтау"}
+            title={
+              current + 1 < quizzes.length
+                ? "Келесі сұрақ (→)"
+                : "Тестті аяқтау"
+            }
           >
-            {current + 1 < quizzes.length ? "Келесі" : "Аяқтау ✅"}
+            {current + 1 < quizzes.length
+              ? "Келесі"
+              : "Аяқтау ✅"}
           </button>
         </div>
       </div>

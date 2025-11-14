@@ -1,16 +1,14 @@
-// src/pages/TopicsPage.tsx
+// src/app/pages/TopicsPage.tsx
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
-import { API_BASE } from "../api/axiosClient";
+import axiosClient from "../api/axiosClient";
 
 interface Topic {
   id: number;
   name: string;
+  created_at?: string;
 }
 
-const API = API_BASE
-
-/* ======== Helpers ======== */
 const colorPool = [
   "bg-blue-100 text-blue-700 ring-blue-200",
   "bg-emerald-100 text-emerald-700 ring-emerald-200",
@@ -31,7 +29,6 @@ function initial(name: string) {
   return name.trim().charAt(0).toUpperCase() || "∎";
 }
 
-/* ======== Icons ======== */
 const SearchIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
     <path
@@ -42,6 +39,7 @@ const SearchIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
     />
   </svg>
 );
+
 const ChevronRight = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
     <path
@@ -54,162 +52,162 @@ const ChevronRight = ({ className = "w-5 h-5" }: { className?: string }) => (
   </svg>
 );
 
-/* ======== Page ======== */
 export default function TopicsPage() {
-  const { name } = useParams();
+  const { userId, subjectId } = useParams();
   const navigate = useNavigate();
+
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  const subjectSlug = encodeURIComponent(name || "");
-
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetch(`${API}/subjects/${subjectSlug}/topics`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Тақырыптар жүктелмеді");
-        return res.json();
-      })
-      .then((data) => setTopics(Array.isArray(data) ? data : []))
-      .catch((e) => setError(e.message || "Қате"))
-      .finally(() => setLoading(false));
-  }, [subjectSlug]);
+    if (!subjectId) {
+      setError("Пән анықталмады.");
+      setLoading(false);
+      return;
+    }
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        // 🔥 axiosClient → токен автомат келеді
+        const res = await axiosClient.get(`/subjects/${subjectId}/topics`);
+        setTopics(Array.isArray(res.data) ? res.data : []);
+      } catch (e: any) {
+        if (e?.response?.status === 401) {
+          setError("Сессия аяқталды. Қайта кіріңіз.");
+        } else if (e?.response?.data?.detail) {
+          setError(e.response.data.detail);
+        } else {
+          setError("Тақырыптар жүктелмеді.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [subjectId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? topics.filter((t) => t.name.toLowerCase().includes(q)) : topics;
+    return q
+      ? topics.filter((t) => t.name.toLowerCase().includes(q))
+      : topics;
   }, [topics, query]);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const goHome = () => {
+    if (!userId) return;
+    navigate(`/u/${userId}`);
+  };
+
+  const openFirstFiltered = (e: React.FormEvent) => {
     e.preventDefault();
-    if (filtered.length > 0) navigate(`/topics/${filtered[0].id}/quizzes`);
+    if (!userId || filtered.length === 0) return;
+    navigate(`/u/${userId}/topics/${filtered[0].id}/quizzes`);
   };
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70">
-        <div className="mx-auto max-w-5xl px-4 py-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 truncate">
-            Тақырыптар
-          </h1>
-
+      <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/85 backdrop-blur">
+        <div className="mx-auto max-w-5xl px-4 py-4 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Тақырыптар
+            </h1>
+            <p className="text-xs text-slate-500">
+              Таңдалған пән бойынша құрылған тақырыптар тізімі.
+            </p>
+          </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-500">
-              Тақырыптар: <b>{topics.length}</b>
+              Барлығы: <b>{topics.length}</b>
             </span>
-
-            {/* NEW: Емтихан батырмасы */}
             <button
               type="button"
-              onClick={() => navigate("/iquiz/start")}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-all"
-            >
-              Емтихан
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("/home")}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium ring-1 ring-slate-300 text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 transition-colors"
+              onClick={goHome}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium ring-1 ring-slate-300 text-slate-700 hover:bg-slate-50"
             >
               Басты бет
             </button>
-            {/* Профиль кнопкасы (логотип) АЛЫП ТАСТАЛДЫ */}
           </div>
         </div>
       </header>
 
-      {/* Content */}
       <main className="mx-auto max-w-5xl px-4 py-6">
-        {/* Search */}
-        <form onSubmit={onSubmit} className="mb-6">
-          <label htmlFor="q" className="sr-only">
-            Тақырыпты іздеу
-          </label>
+        <form onSubmit={openFirstFiltered} className="mb-6">
           <div className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 pointer-events-none">
               <SearchIcon />
             </div>
             <input
-              id="q"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Тақырыпты іздеу…"
-              autoComplete="off"
-              className="w-full pl-11 pr-28 py-3 rounded-xl ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-600 outline-none text-slate-900 placeholder:text-slate-400 bg-white"
+              placeholder="Тақырып атауы бойынша іздеу…"
+              className="w-full pl-11 pr-28 py-3 rounded-xl ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-600 bg-white text-slate-900"
             />
             <button
               type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
             >
               Ашу
             </button>
           </div>
-          <div className="mt-2 text-xs text-slate-500">
-            Көрсетіліп тұрғандар: {filtered.length} / {topics.length}
-          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Көрсетіліп тұрғаны: {filtered.length} / {topics.length}
+          </p>
         </form>
 
-        {/* States */}
         {loading && (
           <ul className="space-y-3" aria-hidden>
-            {Array.from({ length: 8 }).map((_, i) => (
+            {Array.from({ length: 6 }).map((_, i) => (
               <li
                 key={i}
-                className="h-16 rounded-xl bg-slate-100 animate-pulse ring-1 ring-slate-200"
+                className="h-14 rounded-xl bg-slate-100 animate-pulse ring-1 ring-slate-200"
               />
             ))}
           </ul>
         )}
 
         {!loading && error && (
-          <div className="rounded-xl bg-rose-50 ring-1 ring-rose-200 text-rose-700 px-4 py-3">
+          <div className="rounded-xl bg-rose-50 ring-1 ring-rose-200 text-rose-700 px-4 py-3 text-sm">
             {error}
           </div>
         )}
 
         {!loading && !error && filtered.length === 0 && (
-          <div className="rounded-xl bg-slate-50 ring-1 ring-slate-200 px-6 py-10 text-center text-slate-600">
-            <div className="text-5xl mb-2">📄</div>
-            Бұл пәнде тақырып табылмады.
-            <div className="text-sm mt-1">Кілт сөзді қысқартып көріңіз.</div>
+          <div className="rounded-xl bg-slate-50 ring-1 ring-slate-200 px-6 py-10 text-center text-slate-600 text-sm">
+            <div className="text-4xl mb-2">📄</div>
+            Бұл пәнде тақырып тіркелмеген.
           </div>
         )}
 
-        {/* Full-width list */}
         {!loading && !error && filtered.length > 0 && (
-          <nav
-            aria-label="Тақырыптар тізімі"
-            className="divide-y divide-slate-200/70 rounded-xl ring-1 ring-slate-200 bg-white"
-          >
-            {filtered.map((t) => {
-              const color = colorFor(t.name);
+          <nav className="divide-y divide-slate-200/70 rounded-xl ring-1 ring-slate-200 bg-white">
+            {filtered.map((topic) => {
+              const color = colorFor(topic.name);
               return (
                 <button
-                  key={t.id}
-                  onClick={() => navigate(`/topics/${t.id}/quizzes`)}
-                  className="w-full text-left px-4 py-4 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 transition flex items-center gap-4"
+                  key={topic.id}
+                  onClick={() =>
+                    userId &&
+                    navigate(`/u/${userId}/topics/${topic.id}/quizzes`)
+                  }
+                  className="w-full text-left px-4 py-4 hover:bg-slate-50 flex items-center gap-4"
                 >
                   <div
-                    className={`w-12 h-12 grid place-items-center rounded-xl ring ${color} text-lg font-bold`}
+                    className={`w-10 h-10 grid place-items-center rounded-xl ring ${color} text-base font-semibold`}
                   >
-                    {initial(t.name)}
+                    {initial(topic.name)}
                   </div>
-
                   <div className="min-w-0 flex-1">
-                    <div className="text-slate-900 text-lg font-semibold truncate">
-                      {t.name}
-                    </div>
-                    <div className="text-slate-500 text-sm">
-                      Басу арқылы осы тақырыптан quiz басталады
+                    <div className="text-slate-900 text-sm font-semibold truncate">
+                      {topic.name}
                     </div>
                   </div>
-
-                  <div className="text-slate-300 group-hover:text-slate-500">
+                  <div className="text-slate-300">
                     <ChevronRight />
                   </div>
                 </button>

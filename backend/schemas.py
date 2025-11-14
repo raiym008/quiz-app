@@ -35,6 +35,7 @@ class SubjectCreate(BaseModel):
 class TopicCreate(BaseModel):
     name: str
 
+
 class QuizCreate(BaseModel):
     question: str
     options: List[str]

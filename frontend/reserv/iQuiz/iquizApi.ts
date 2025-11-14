@@ -1,5 +1,5 @@
 // src/app/modes/iQuiz/iquizApi.ts
-import { API_BASE } from "../../api/axiosClient";
+import { API_BASE } from "../../src/app/api/axiosClient";
 
 const WS_BASE = import.meta.env.VITE_WS_BASE || "ws://localhost:8000";
 
