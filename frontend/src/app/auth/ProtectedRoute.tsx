@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 
 const ACCESS_KEY = "access_token";
@@ -6,7 +6,6 @@ const REFRESH_KEY = "refresh_token";
 const USER_KEY = "user";
 const USER_ID_KEY = "user_id";
 
-// Барлық сессия деректерін тазалау
 function clearSession() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
@@ -14,7 +13,6 @@ function clearSession() {
   localStorage.removeItem(USER_ID_KEY);
 }
 
-// JWT expiry тексеру
 function isJwtValid(token: string | null): boolean {
   if (!token) return false;
   try {
@@ -31,7 +29,6 @@ function isJwtValid(token: string | null): boolean {
   }
 }
 
-// Локал сессиядан мәлімет оқу
 function readAuth() {
   const token = localStorage.getItem(ACCESS_KEY);
   const uid = localStorage.getItem(USER_ID_KEY);
@@ -50,8 +47,12 @@ function readAuth() {
   return { ok: true, uid };
 }
 
-export default function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { userId: routeId } = useParams(); // /u/:userId сияқты маршруттар үшін
+export default function ProtectedRoute({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { userId: routeId } = useParams();
   const [checking, setChecking] = useState(true);
   const [ok, setOk] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -63,7 +64,6 @@ export default function ProtectedRoute({ children }: { children: JSX.Element }) 
     setChecking(false);
   }, []);
 
-  // Жүктелу күйі (дизайнды жеңіл ұстаймыз)
   if (checking) {
     return (
       <div
@@ -83,17 +83,13 @@ export default function ProtectedRoute({ children }: { children: JSX.Element }) 
     );
   }
 
-  // Сессия жоқ немесе жарамсыз → логинге
   if (!ok || !uid) {
     return <Navigate to="/login" replace />;
   }
 
-  // Егер маршрут /u/:userId түрінде болса:
-  // бөтен id енгізілсе, автоматты түрде өз id-іне бұрамыз
   if (routeId && routeId !== uid) {
     return <Navigate to={`/u/${uid}`} replace />;
   }
 
-  // Барлық шарттар орындалды → protected контентті көрсетеміз
-  return children;
+  return <>{children}</>;
 }

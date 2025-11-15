@@ -241,7 +241,7 @@ export default function VerifyPage() {
                     handlePaste(e, i)
                   }
                   ref={(el) =>
-                    (inputs.current[i] = el)
+                    {inputs.current[i] = el}
                   }
                   className="w-12 h-12 text-center text-xl font-semibold rounded-xl border border-gray-300 bg-gray-50 text-gray-800 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all"
                 />
