@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { FiUploadCloud, FiFileText, FiXCircle, FiCheckCircle } from "react-icons/fi";
 
 type AutomateQuizProps = {
+  disabled: boolean;
   onFileSelect: (file: File) => void;      // Валид файл таңдағанда шақырылады
   maxSizeMB?: number;                       // Макс өлшем (әдепкі 15MB)
   accept?: string;                          // Қабылдайтын типтер (әдепкі ".docx")

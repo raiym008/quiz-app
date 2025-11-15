@@ -7,8 +7,8 @@ import FeedbackModal from "./FeedbackModal";
 import {
   registerFeedbackListener,
   triggerFeedback as triggerFeedbackBus,
-  FeedbackTriggerPayload,
 } from "./feedbackBus";
+import type { FeedbackTriggerPayload } from "./feedbackBus";
 
 const LS_LAST_FEEDBACK = "easy_fb_last_any";
 const COOLDOWN_DAYS = 7;
